@@ -1,0 +1,17 @@
+[package]
+name = "sietch-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "#[service] macro: one trait -> typed client + axum router + clap + (v2) mcp."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

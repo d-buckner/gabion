@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sietch",
+    "crates/sietch-macros",
+    "crates/sietch-native",
+    "example/features/todo/todo-api",
+    "example/features/todo/todo-core",
+    "example/features/todo/todo-render",
+    "example/hosts/host-native",
+    "example/hosts/host-server",
+    "example/hosts/host-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+# Effect ban for *-core crates (see clippy.toml for the disallowed list).
+# std::time compiles on wasm (it only panics at runtime), so the target alone
+# does NOT catch it — this gate does. Apps re-declare it in their core crates.
+disallowed_types = "deny"
+disallowed_methods = "deny"
+
+[workspace.dependencies]
+sietch = { path = "crates/sietch" }
+sietch-macros = { path = "crates/sietch-macros" }
+sietch-native = { path = "crates/sietch-native" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+clap = "4"
+tower = { version = "0.5", features = ["util"] }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

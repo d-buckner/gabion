@@ -1,0 +1,16 @@
+[package]
+name = "todo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "todo business logic. Pure: no tokio, no std::fs/net/time — compiles to wasm32."
+
+[dependencies]
+sietch = { workspace = true }
+todo-api = { path = "../todo-api" }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

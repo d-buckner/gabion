@@ -1,0 +1,14 @@
+[package]
+name = "todo-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "todo UI. Depends on todo-api ONLY — todo-core is not in [dependencies], so importing core internals is unrepresentable."
+
+[dependencies]
+sietch = { workspace = true }
+todo-api = { path = "../todo-api" }
+# NOTE: no todo-core here. That is the wall. The host injects the impl.
+
+[lints]
+workspace = true

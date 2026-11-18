@@ -1,0 +1,22 @@
+[package]
+name = "host-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native host: CLI + render, core in-process. Composition only — no business logic here."
+
+[[bin]]
+name = "myapp"
+path = "src/main.rs"
+
+[dependencies]
+sietch = { workspace = true }
+sietch-native = { workspace = true }
+todo-api = { path = "../../features/todo/todo-api", features = ["cli"] }
+todo-core = { path = "../../features/todo/todo-core" }
+todo-render = { path = "../../features/todo/todo-render" }
+clap = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

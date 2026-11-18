@@ -1,0 +1,13 @@
+[package]
+name = "sietch-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native capability impls (SystemClock). Host-side only — never imported by *-core."
+
+[dependencies]
+sietch = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
