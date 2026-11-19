@@ -2,11 +2,12 @@
 name = "todo-render"
 version.workspace = true
 edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
 license.workspace = true
 description = "todo UI. Depends on todo-api ONLY — todo-core is not in [dependencies], so importing core internals is unrepresentable."
 
 [dependencies]
-gabion = { workspace = true }
 todo-api = { path = "../todo-api" }
 # Dioxus core + signals only — NO renderer feature here. The host picks the
 # renderer (desktop/web), so this crate stays dual-target native + wasm.

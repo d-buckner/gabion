@@ -38,7 +38,10 @@ pub fn start() {
 }
 
 fn wasm_caps() -> WasmCaps {
-    WasmCaps { clock: MockClock(Timestamp(0)), store: InMemoryStore::default() }
+    WasmCaps {
+        clock: MockClock(Timestamp(0)),
+        store: InMemoryStore::default(),
+    }
 }
 
 /// Entry point the browser glue would call (wired to JS in the next pass).

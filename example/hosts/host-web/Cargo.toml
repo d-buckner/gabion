@@ -2,6 +2,8 @@
 name = "host-web"
 version.workspace = true
 edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
 license.workspace = true
 description = "Web host (cdylib): proves the whole stack — api + core + render — compiles to wasm32-unknown-unknown."
 

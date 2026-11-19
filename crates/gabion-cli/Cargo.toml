@@ -1,0 +1,31 @@
+[package]
+name = "gabion-cli"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+description = "gabion check: one command, one exit code. Orchestrates clippy + fmt + cargo-shear + cargo-deny + wasm builds, and adds the three rules no existing linter can express."
+
+[[bin]]
+name = "gabion"
+path = "src/main.rs"
+
+[lib]
+name = "gabion_cli"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+toml = "0.8"
+# span-locations: line/column from syn spans on stable. rustc_lexer: the real
+# rustc tokenizer, so comments/strings/lifetimes are told apart exactly.
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+syn = { workspace = true, features = ["visit"] }
+rustc_lexer = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

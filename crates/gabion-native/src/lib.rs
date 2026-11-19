@@ -1,4 +1,14 @@
 //! Native capability implementations (host-side; std::time allowed HERE, never in core).
+//!
+//! # Effect home
+//!
+//! This crate is a *designated effect home*: the only place in a gabion app
+//! where the banned effects (std::time, std::fs, std::env, std::net, threads)
+//! are allowed to live. The ban in clippy.toml is global, so the opt-out has to
+//! be explicit and crate-wide — and `gabion check` fails the build if a
+//! `#![allow(clippy::disallowed_*)]` shows up in any crate that is not a
+//! declared effect home. One line here, audited; not twelve scattered ones.
+#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 
 use gabion::async_trait;
 use gabion::caps::{Caps, Clock, Timestamp};
@@ -8,13 +18,11 @@ pub mod filestore;
 pub use filestore::FileStore;
 
 /// Wall clock from `std::time` — the native impl. Core code only sees `Clock`.
-/// This crate is the designated effect home: the framework's own effect ban
-/// (workspace clippy deny) is explicitly lifted HERE, nowhere else.
 #[derive(Clone)]
 pub struct SystemClock;
 
 #[async_trait]
-#[allow(clippy::disallowed_types, clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)] // bootstrap-level: duration_since only errs on pre-epoch clocks
 impl Clock for SystemClock {
     async fn now(&self) -> Timestamp {
         let secs = std::time::SystemTime::now()
@@ -35,7 +43,10 @@ pub struct NativeCaps {
 impl NativeCaps {
     #[must_use]
     pub fn new() -> Self {
-        Self { clock: SystemClock, store: InMemoryStore::default() }
+        Self {
+            clock: SystemClock,
+            store: InMemoryStore::default(),
+        }
     }
 }
 
@@ -65,7 +76,10 @@ pub struct FileCaps {
 
 impl FileCaps {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Result<Self, gabion::caps::StoreError> {
-        Ok(Self { clock: SystemClock, store: FileStore::new(path)? })
+        Ok(Self {
+            clock: SystemClock,
+            store: FileStore::new(path)?,
+        })
     }
 }
 

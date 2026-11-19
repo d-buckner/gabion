@@ -22,7 +22,7 @@ impl<C: Caps> TodoServiceImpl<C> {
 }
 
 fn internal() -> TodoErr {
-    todo_err(TodoError::NotFound)
+    todo_err(TodoError::Internal)
 }
 
 #[async_trait]
@@ -39,7 +39,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             done: false,
             created_at: now.0,
         };
-        let json = gabion::serde_json::to_string(&todo).unwrap_or_default();
+        let json = gabion::serde_json::to_string(&todo).map_err(|_| internal())?;
         self.caps
             .store()
             .set(&Self::key(&id), &json)
@@ -59,7 +59,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             .and_then(|s| gabion::serde_json::from_str::<Todo>(&s).ok())
             .ok_or_else(|| todo_err(TodoError::NotFound))?;
         todo.done = true;
-        let json = gabion::serde_json::to_string(&todo).unwrap_or_default();
+        let json = gabion::serde_json::to_string(&todo).map_err(|_| internal())?;
         self.caps
             .store()
             .set(&Self::key(&todo.id), &json)
@@ -75,10 +75,10 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             .list("todo/")
             .await
             .map_err(|_| internal())?;
-        Ok(items
+        items
             .iter()
-            .filter_map(|(_, v)| gabion::serde_json::from_str::<Todo>(v).ok())
-            .collect())
+            .map(|(_, v)| gabion::serde_json::from_str::<Todo>(v).map_err(|_| internal()))
+            .collect()
     }
 
     async fn recompute_stats(&self, _input: ()) -> Result<(), TodoErr> {
@@ -95,7 +95,12 @@ mod tests {
     #[tokio::test]
     async fn create_list_complete() {
         let svc = TodoServiceImpl::new(TestCaps::new());
-        let t = svc.create(CreateTodo { title: "milk".into() }).await.unwrap();
+        let t = svc
+            .create(CreateTodo {
+                title: "milk".into(),
+            })
+            .await
+            .unwrap();
         assert!(!t.done);
         assert_eq!(svc.list(()).await.unwrap().len(), 1);
         let done = svc.complete(TodoId(t.id.clone())).await.unwrap();
@@ -105,7 +110,10 @@ mod tests {
     #[tokio::test]
     async fn empty_title_is_invalid_input() {
         let svc = TodoServiceImpl::new(TestCaps::new());
-        let e = svc.create(CreateTodo { title: "  ".into() }).await.unwrap_err();
+        let e = svc
+            .create(CreateTodo { title: "  ".into() })
+            .await
+            .unwrap_err();
         assert_eq!(e.kind_code, ErrorKind::InvalidInput);
         assert_eq!(e.kind_code.http_status(), 400);
     }

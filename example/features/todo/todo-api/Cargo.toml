@@ -2,6 +2,8 @@
 name = "todo-api"
 version.workspace = true
 edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
 license.workspace = true
 description = "todo feature contract: wire types + #[service] trait. Compiles everywhere."
 
@@ -16,6 +18,12 @@ serde = { workspace = true }
 axum = { workspace = true, optional = true }
 bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
+
+# These four are used only inside the code `#[service]` generates (axum handlers,
+# clap args, serde wire types), so cargo-shear cannot see them. This is the
+# tool's documented escape hatch rather than a deleted wall.
+[package.metadata.cargo-shear]
+ignored = ["serde", "axum", "bytes", "clap"]
 
 [lints]
 workspace = true

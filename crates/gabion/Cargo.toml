@@ -2,6 +2,8 @@
 name = "gabion"
 version.workspace = true
 edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
 license.workspace = true
 description = "Runtime-free core: capability traits, error model, client contracts for gabion apps."
 
