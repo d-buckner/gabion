@@ -1,13 +1,17 @@
-# sietch
+# gabion
 
-A Dune-inspired Rust framework for single-binary apps: **one business core, four
-surfaces** (CLI, HTTP, MCP, typed client), natively and in the browser as wasm —
-with architectural shortcuts *mechanically sealed*.
+A civil-engineering-inspired Rust framework for single-binary apps: **one
+business core, four surfaces** (CLI, HTTP, MCP, typed client), natively and in
+the browser as wasm — with architectural shortcuts *mechanically sealed*.
 
-Inspired by [Dune](https://x.com/poteto/status/2087227636590465030), the Grok Bot
-client architecture: agents take shortcuts, so the shortest path must be the
-correct path. Enforcement is mechanical — crate graph, compile targets, lint
-gates — never a standard the author has to remember.
+Named for [gabion walls](https://en.wikipedia.org/wiki/Gabion): cages of rocks
+that hold back a slope while letting water drain through. Slopes fail by
+taking shortcuts — so do codebases (the Grok-Bot-client lesson: agents take
+shortcuts, so the shortest path must be the correct path). Gabions don't rely
+on anyone remembering to maintain them; the geometry does the work. Here the
+geometry is the crate graph, compile targets, and lint gates — enforcement is
+mechanical, never a standard the author has to remember. The wall holds back
+the slope; the drains (api DTOs, trait objects) still flow.
 
 ## The two walls (both proven in this repo)
 
@@ -44,9 +48,9 @@ error code, and CLI exit code — one mapping, everywhere.
 ## Layout
 
 ```
-crates/sietch/          runtime: capability traits, error model, testing caps
-crates/sietch-macros/   #[service]
-crates/sietch-native/   native caps: SystemClock, FileStore (the effect home)
+crates/gabion/          runtime: capability traits, error model, testing caps
+crates/gabion-macros/   #[service]
+crates/gabion-native/   native caps: SystemClock, FileStore (the effect home)
 example/features/todo/  todo-api | todo-core | todo-render  (the colocation unit)
 example/hosts/          host-native (CLI+ui) | host-server (axum) | host-web (wasm)
 ```

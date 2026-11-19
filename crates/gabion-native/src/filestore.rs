@@ -1,10 +1,10 @@
 //! File-backed `Store` for native hosts: one JSON object on disk, rewritten on
 //! write. Deliberately simple — redb is the planned v1 impl; this exists so the
-//! CLI demo persists state across process invocations. Lives in sietch-native
+//! CLI demo persists state across process invocations. Lives in gabion-native
 //! (host side) precisely because it touches std::fs — which core may never do.
 
-use sietch::async_trait;
-use sietch::caps::{Store, StoreError};
+use gabion::async_trait;
+use gabion::caps::{Store, StoreError};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

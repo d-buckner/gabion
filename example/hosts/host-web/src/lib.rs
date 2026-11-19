@@ -3,9 +3,12 @@
 //! WebCaps pass. This crate's job right now is to PROVE the wall holds:
 //! `cargo build -p host-web --target wasm32-unknown-unknown` must pass.
 
-use sietch::caps::{Caps, Timestamp};
-use sietch::testing::{InMemoryStore, MockClock};
+use gabion::caps::{Caps, Timestamp};
+use gabion::testing::{InMemoryStore, MockClock};
+use std::sync::Arc;
+use todo_api::TodoService;
 use todo_core::TodoServiceImpl;
+use wasm_bindgen::prelude::*;
 
 #[derive(Clone)]
 pub struct WasmCaps {
@@ -24,9 +27,23 @@ impl Caps for WasmCaps {
     }
 }
 
+/// Browser entry: launches the same Dioxus `TodoApp` the desktop host uses,
+/// with the wasm-side service injected via launch context.
+#[wasm_bindgen(start)]
+pub fn start() {
+    let svc: Arc<dyn TodoService + Send + Sync> = Arc::new(TodoServiceImpl::new(wasm_caps()));
+    dioxus::LaunchBuilder::new()
+        .with_context(todo_render::Svc(svc))
+        .launch(todo_render::TodoApp);
+}
+
+fn wasm_caps() -> WasmCaps {
+    WasmCaps { clock: MockClock(Timestamp(0)), store: InMemoryStore::default() }
+}
+
 /// Entry point the browser glue would call (wired to JS in the next pass).
 pub async fn demo() -> String {
-    let caps = WasmCaps { clock: MockClock(Timestamp(0)), store: InMemoryStore::default() };
+    let caps = wasm_caps();
     let svc = TodoServiceImpl::new(caps);
     let _ = todo_render::on_add_clicked(&svc, "buy sandspice").await;
     todo_render::render_list(&svc).await.unwrap_or_default()

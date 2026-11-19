@@ -1,7 +1,7 @@
 //! todo feature contract. The renderer may import THIS crate only —
 //! never todo-core. DTOs live here, not in core, so the wall is physical.
 
-use sietch::prelude::*;
+use gabion::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTodo {

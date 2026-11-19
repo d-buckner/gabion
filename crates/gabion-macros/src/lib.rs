@@ -51,12 +51,12 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
 
     let mut methods: Vec<Method> = Vec::new();
     let mut cleaned = input.clone();
-    cleaned.attrs.push(syn::parse_quote!(#[::sietch::async_trait]));
+    cleaned.attrs.push(syn::parse_quote!(#[::gabion::async_trait]));
 
     for item in cleaned.items.iter_mut() {
         if let TraitItem::Fn(m) = item {
             let exposed = !input_allows_internal(&m);
-            // strip sietch attrs from the emitted trait
+            // strip gabion attrs from the emitted trait
             m.attrs.retain(|a| {
                 !(a.path().is_ident("internal") || a.path().is_ident("surface"))
             });
@@ -100,12 +100,12 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
         let hid = format_ident!("__h_{}", m.snake);
         let parse = match &m.input {
             Some(ty) => quote! {
-                let input: #ty = match ::sietch::serde_json::from_slice(&body) {
+                let input: #ty = match ::gabion::serde_json::from_slice(&body) {
                     Ok(v) => v,
                     Err(err) => {
                         return (
                             ::axum::http::StatusCode::BAD_REQUEST,
-                            ::axum::Json(::sietch::serde_json::json!({
+                            ::axum::Json(::gabion::serde_json::json!({
                                 "kind": "invalid_input",
                                 "message": err.to_string(),
                             })),
@@ -187,8 +187,8 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
             Some(ty) => quote! {
                 {
                     let raw = sm.get_one::<String>("json").cloned().unwrap_or_else(|| "null".into());
-                    let input: #ty = ::sietch::serde_json::from_str(&raw).map_err(|e| {
-                        ::sietch::cli::CliExit { code: 2, message: format!("bad --json: {e}") }
+                    let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
+                        ::gabion::cli::CliExit { code: 2, message: format!("bad --json: {e}") }
                     })?;
                     svc.#id(input).await
                 }
@@ -197,8 +197,8 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
         };
         quote! {
             Some((#name, sm)) => #call
-                .map(|v| ::sietch::serde_json::to_string_pretty(&v).unwrap_or_default())
-                .map_err(|e| ::sietch::cli::CliExit {
+                .map(|v| ::gabion::serde_json::to_string_pretty(&v).unwrap_or_default())
+                .map_err(|e| ::gabion::cli::CliExit {
                     code: e.kind_code.exit_code(),
                     message: e.message.clone(),
                 }),
@@ -222,10 +222,10 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
             pub async fn #cli_dispatch_fn(
                 svc: &(dyn #trait_ident + Send + Sync),
                 m: &::clap::ArgMatches,
-            ) -> ::core::result::Result<String, ::sietch::cli::CliExit> {
+            ) -> ::core::result::Result<String, ::gabion::cli::CliExit> {
                 match m.subcommand() {
                     #(#dispatch_arms)*
-                    _ => Err(::sietch::cli::CliExit {
+                    _ => Err(::gabion::cli::CliExit {
                         code: 2,
                         message: format!("unknown subcommand for {}", #ns),
                     }),

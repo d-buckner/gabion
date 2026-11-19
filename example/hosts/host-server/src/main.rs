@@ -6,7 +6,7 @@ use todo_core::TodoServiceImpl;
 #[tokio::main]
 #[allow(clippy::unwrap_used)] // spec bans unwrap in *-core; host main is bootstrap
 async fn main() {
-    let caps = sietch_native::NativeCaps::new();
+    let caps = gabion_native::NativeCaps::new();
     let svc = Arc::new(TodoServiceImpl::new(caps));
 
     let app = todo_api::__todo_server::todo_router(svc);
