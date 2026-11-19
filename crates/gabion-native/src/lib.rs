@@ -11,8 +11,12 @@
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 
 use gabion::async_trait;
-use gabion::caps::{Caps, Clock, Random, Timestamp};
+use gabion::caps::{
+    Caps, Clock, Http, HttpError, HttpMethod, HttpRequest, HttpResponse, Random, Sleep, Timer,
+    Timestamp,
+};
 use gabion::testing::InMemoryStore;
+use std::time::Duration;
 
 pub mod filestore;
 pub use filestore::FileStore;
@@ -53,12 +57,89 @@ impl Clock for SystemClock {
     }
 }
 
+/// Real timer over `tokio::time`. A host drives it from a tokio runtime; outside
+/// one tokio panics loudly, which beats waiting for a clock that does not run.
+#[derive(Clone, Copy, Default)]
+pub struct TokioSleep;
+
+impl Sleep for TokioSleep {
+    fn sleep(&self, millis: u64) -> Timer {
+        Box::pin(tokio::time::sleep(Duration::from_millis(millis)))
+    }
+
+    /// On a real clock a deadline and a wait are the same timer.
+    fn timer(&self, millis: u64) -> Timer {
+        self.sleep(millis)
+    }
+}
+
+/// Real http client. This is the effect a cross-feature call travels on: the
+/// core names a URL, this names the library.
+#[derive(Clone, Default)]
+pub struct ReqwestHttp {
+    client: reqwest::Client,
+}
+
+impl ReqwestHttp {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl Http for ReqwestHttp {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        let mut call = match request.method {
+            HttpMethod::Get => self.client.get(&request.url),
+            HttpMethod::Post => self.client.post(&request.url),
+            HttpMethod::Put => self.client.put(&request.url),
+            HttpMethod::Delete => self.client.delete(&request.url),
+        };
+        for (name, value) in &request.headers {
+            call = call.header(name, value);
+        }
+        let reply = call
+            .body(request.body)
+            .send()
+            .await
+            .map_err(|e| HttpError::Transport(e.to_string()))?;
+        let status = reply.status().as_u16();
+        // Header values that are not UTF-8 are dropped: v1 carries JSON, and a
+        // caller that needs raw bytes gets them from the body.
+        let headers = reply
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|v| (name.to_string(), v.to_string()))
+            })
+            .collect();
+        let body = reply
+            .bytes()
+            .await
+            .map_err(|e| HttpError::Transport(e.to_string()))?
+            .to_vec();
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+}
+
 /// The native host's capability bundle.
 #[derive(Clone)]
 pub struct NativeCaps {
     clock: SystemClock,
     store: InMemoryStore,
     random: SystemRandom,
+    sleep: TokioSleep,
+    http: ReqwestHttp,
 }
 
 impl NativeCaps {
@@ -68,6 +149,8 @@ impl NativeCaps {
             clock: SystemClock,
             store: InMemoryStore::default(),
             random: SystemRandom,
+            sleep: TokioSleep,
+            http: ReqwestHttp::new(),
         }
     }
 }
@@ -82,6 +165,8 @@ impl Caps for NativeCaps {
     type Clock = SystemClock;
     type Store = InMemoryStore;
     type Random = SystemRandom;
+    type Sleep = TokioSleep;
+    type Http = ReqwestHttp;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -90,6 +175,12 @@ impl Caps for NativeCaps {
     }
     fn random(&self) -> &Self::Random {
         &self.random
+    }
+    fn sleep(&self) -> &Self::Sleep {
+        &self.sleep
+    }
+    fn http(&self) -> &Self::Http {
+        &self.http
     }
 }
 
@@ -99,6 +190,8 @@ pub struct FileCaps {
     clock: SystemClock,
     store: FileStore,
     random: SystemRandom,
+    sleep: TokioSleep,
+    http: ReqwestHttp,
 }
 
 impl FileCaps {
@@ -107,6 +200,8 @@ impl FileCaps {
             clock: SystemClock,
             store: FileStore::new(path)?,
             random: SystemRandom,
+            sleep: TokioSleep,
+            http: ReqwestHttp::new(),
         })
     }
 }
@@ -115,6 +210,8 @@ impl Caps for FileCaps {
     type Clock = SystemClock;
     type Store = FileStore;
     type Random = SystemRandom;
+    type Sleep = TokioSleep;
+    type Http = ReqwestHttp;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -123,6 +220,12 @@ impl Caps for FileCaps {
     }
     fn random(&self) -> &Self::Random {
         &self.random
+    }
+    fn sleep(&self) -> &Self::Sleep {
+        &self.sleep
+    }
+    fn http(&self) -> &Self::Http {
+        &self.http
     }
 }
 

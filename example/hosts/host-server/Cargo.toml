@@ -19,5 +19,9 @@ todo-core = { path = "../../features/todo/todo-core" }
 axum = { workspace = true }
 tokio = { workspace = true }
 
+[dev-dependencies]
+gabion = { workspace = true }
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

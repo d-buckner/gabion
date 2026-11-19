@@ -12,6 +12,13 @@ description = "Native capability impls (SystemClock). Host-side only — never i
 gabion = { workspace = true }
 serde_json = { workspace = true }
 getrandom = "0.3"
+tokio = { workspace = true, features = ["time"] }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+# test-util: the timer tests run on tokio's paused clock, so they check a
+# real timer without spending wall time.
+tokio = { workspace = true, features = ["time", "test-util"] }
 
 [lints]
 workspace = true

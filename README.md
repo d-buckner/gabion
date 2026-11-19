@@ -60,9 +60,11 @@ strictest work for free:
   `disallowed_types` and `disallowed_methods`, and gabion audits that list.
 
 Effects are not forbidden in the app. They move. Core code asks for a capability
-(`Clock`, `Store`), and the host injects a per-target implementation. A native
-host wires a real clock and a file store. A test wires a fixed clock and an
-in-memory store. Core code never sees the difference.
+(`Clock`, `Store`, `Sleep`, `Http`), and the host injects a per-target
+implementation. A native host wires a real clock, a file store, a tokio timer,
+and a rustls http client. A test wires a virtual clock that moves only when code
+asks to wait, an in-memory store, and scripted http. Core code never sees the
+difference.
 
 ## Layer 3: `gabion check` closes the rest, and audits itself
 
@@ -286,10 +288,11 @@ binary with a file-backed store and as an HTTP server, `todo-core` compiles clea
 to wasm, and the gate passes on this repo.
 
 **Built:** the three-crate feature shape, the edge-table audit, `#[service]` codegen
-for clap and axum, the capability model (`Clock`, `Store`, `Random`) with native
-and deterministic test impls, an error model that survives the wire (`WireError`),
-the effect ban across time, env, process, fs, net, and threads, `gabion check`
-with a failing fixture per rule, and CI for GitHub Actions.
+for clap and axum, the capability model (`Clock`, `Store`, `Random`, `Sleep`,
+`Http`, plus a `timeout` combinator) with native and deterministic test impls, an
+error model that survives the wire (`WireError`), the effect ban across time, env,
+process, fs, net, and threads, `gabion check` with a failing fixture per rule, and
+CI for GitHub Actions.
 
 **Not built:** the MCP surface, the generated typed client, `gabion new`
 scaffolding, per-call `Ctx` (so caller identity and authorization are not

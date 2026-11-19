@@ -15,5 +15,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 gabion-macros = { workspace = true }
 
+# Only for the test harness: the capability tests need an executor to drive the
+# futures they assert on. Nothing in the library depends on a runtime.
+[dev-dependencies]
+tokio = { workspace = true }
+
 [lints]
 workspace = true

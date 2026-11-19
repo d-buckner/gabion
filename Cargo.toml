@@ -66,6 +66,9 @@ serde_json = "1"
 thiserror = "2"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+# rustls only, so the native http capability keeps the single-binary promise:
+# no system openssl, no system ca-certificate path to configure.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 clap = "4"
 dioxus = { version = "0.7", default-features = false }
 wasm-bindgen = "0.2"
