@@ -221,6 +221,50 @@ Cross-feature references stay by ID (feature wall), so cross-doc joins are just
 reads — no cross-doc transactions needed. This is a lucky alignment: the
 feature wall *is* the document boundary.
 
+### 4.6 Rooms: yes as machinery, no as chore
+
+Yes, the framework has a room concept — because four concerns must share one
+key, and if they're separate knobs apps will let them drift:
+
+| Concern | What breaks without a shared room key |
+|---|---|
+| sync domain (one automerge doc) | peers with different doc sets can't converge |
+| presence scope | "who's here" is meaningless without a "here" |
+| authz scope | nothing for an invite / capability token to grant (§10.5) |
+| persistence partition | no key for `doc:{room}` in `Store` (§6) |
+
+But the app should barely notice it, per the §4.2 DX bar:
+
+- **Default: implicit singleton room per feature.** `#[collab]` on `TodoDoc`
+  ⇒ room `"todos"`. Most apps never write the word "room" at all.
+- **Partitioned domains opt in with their own identity.** When the domain has
+  partitions (per-project, per-playlist, per-document-slug), the app scopes
+  the doc with an ID it *already has*:
+
+  ```rust
+  let doc   = collab.doc_in::<ProjectDoc>(RoomKey::of(project_id));
+  let peers = doc.presence();          // presence is scoped to the doc's room
+  ```
+
+  That is domain vocabulary, not networking vocabulary — the framework
+  invents no IDs, it borrows yours. `#[collab(partitioned_by = ProjectId)]`
+  makes it codegen-visible so the server can enumerate rooms.
+- **Peer ≠ room.** One connection, many rooms: the protocol multiplexes
+  (`join`/`sync`/`signal` carry the room field). A peer can be in three
+  project rooms plus the `"todos"` singleton simultaneously; the WS
+  connection is per-peer, the room is a logical partition over its messages.
+- **Two lifetimes under one key.** The presence set is ephemeral (dissolves
+  when empty); the doc is durable (server replica keeps it, §5.2). "Room"
+  names both — worth being explicit about, because "leave the room" must
+  never imply "delete the data".
+- **Room is the unit of authz.** An invite grants a room, never "the app's
+  collab". This is why the room must exist as a named entity even when the
+  app API hides it — tokens need an audience.
+
+Naming note: "room" is p2piano's word and it's friendly, but the concept is
+*sync domain* first, party second. [OPEN: room vs scope vs space — cheap to
+rename now, expensive after public API.]
+
 ## 5. Sync protocol
 
 Don't invent one. Automerge has a wire-ready sync protocol (`automerge::sync`:
@@ -376,8 +420,10 @@ Order matters: E1–E2 are pure and cheap and kill the two scariest unknowns
 4. Native WebRTC impl: `str0m` (minimal, pure Rust, we own ICE/SDP glue) vs
    `webrtc-rs` (batteries included, heavier). Decide at E4; the `Transport`
    trait makes it swappable. iroh stays a v2 maybe for native↔native only.
-5. Room auth: open rooms + capability tokens? Ties into gabion's auth story
-   which doesn't exist yet — collab shouldn't invent it alone.
+5. Room auth: open rooms + capability tokens? Room is already the authz unit
+   (§4.6) — ties into gabion's auth story which doesn't exist yet; collab
+   shouldn't invent it alone.
+6. Room naming: room vs scope vs space (§4.6) — decide before public API.
 6. E2EE: per-room key in invite URL fragment, encrypt `sync` payloads; cheap
    and local-first-appropriate — v1.1?
 7. Does MCP-on-server mutate the server replica like any peer (yes, per §5.2 —
