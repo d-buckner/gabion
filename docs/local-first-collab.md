@@ -6,16 +6,21 @@ relay + WebRTC signaling types already proven there).
 
 ## 0. The one-line thesis
 
-Collaboration is **another capability**, not another architecture. Automerge is
-pure Rust and wasm-safe, so the CRDT lives *inside* `*-core`; everything that
-touches a network — WS signaling, WebRTC, relays — is an effect behind a
-capability trait, exactly like `Store` and `Clock`. Apps opt in by adding one
+Collaboration is **another capability**, not another architecture — and the
+app-facing surface is *two markers* (`#[collab]` on a data structure,
+`#[collab(event)]` on a message type) plus one line of host wiring. The
+consuming app never sees a transport, a room join, a sync message, or a
+reconnect. Automerge is pure Rust and wasm-safe, so the CRDT lives *inside*
+`*-core`; everything that touches a network is an effect behind the `Collab`
+capability, exactly like `Store` and `Clock`. Apps opt in by adding one
 feature; apps that don't, compile the same binary they always did.
 
 ## 1. Goals
 
-1. **Optional**: `cargo add gabion-collab` + one feature flag is the entire
-   adoption cost. Zero generated-code changes for non-collab apps.
+1. **Optional**: the app-facing adoption cost is `#[collab]` on a struct +
+   `#[collab(event)]` on a message type + one `.with_collab(url)` line in the
+   host. Zero generated-code changes for non-collab apps; the same app code
+   runs single-player with no URL wired (§4.2).
 2. **Local-first**: the app is fully functional offline. Sync is a background
    reconciler, never a request/response dependency. Closing the laptop mid-edit
    loses nothing; reopening converges.
@@ -48,7 +53,8 @@ do the policing. Collab slots in without bending a single rule:
 | Persistence of the doc | `Store` capability (already exists) | automerge `save()` → bytes → the same key-value store the app already has. |
 
 **The sync engine is a reactor, not an actor.** It never opens a socket. It
-takes `Vec<PeerEvent>` in and returns `Vec<PeerCmd>` out:
+takes `Vec<PeerEvent>` in and returns `Vec<PeerCmd>` out (these types are
+framework-internal — the consuming app never sees them, §4.2):
 
 ```rust
 // gabion-collab (pure, wasm-safe, runtime-free)
@@ -86,36 +92,120 @@ crates/gabion-web/       # NEW: browser WS + WebRTC DataChannel impls [feature "
 on wasm32 — that is the wall proof, same as `cargo build -p todo-core --target
 wasm32-unknown-unknown` today.
 
-### 4.2 The marker
+### 4.2 The ideal DX: the app never sees the network
 
-A service trait fn (or whole trait) marked collaborative changes what `#[service]`
-generates:
+The bar is not "collab is available" — it is "collab is ambient". The
+consuming app declares *what* is shared and never thinks about *how* it gets
+there. Three declarations, zero networking concepts:
 
 ```rust
-#[service]
-pub trait TodoService {
-    #[surface(cli, http, mcp)]
-    #[collab(room = "todos")]          // ← the entire opt-in
-    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
-    ...
+// todo-api — the entire collaboration surface of a feature:
+
+#[collab]                                    // state: durable, convergent, offline-safe
+pub struct TodoDoc {
+    pub items: CollabVec<Todo>,              // sequence CRDT (RGA)
+    pub notes: CollabMap<TodoId, Note>,      // map CRDT, merges per key
+    pub draft: CollabText,                   // text CRDT (collaborative textarea)
+    pub title: String,                       // plain field → LWW register
+}
+
+#[collab(event)]                             // events: ephemeral fanout, not persisted
+pub struct Typing { pub peer: PeerId, pub item: TodoId }
+```
+
+```rust
+// todo-core — business logic just edits. Sync is ambient.
+impl<C: Caps> TodoService for TodoServiceImpl<C> {
+    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr> {
+        let doc = self.caps.collab().doc::<TodoDoc>();  // local replica; always available, even offline
+        let todo = Todo { id: new_id(), title: input.title, done: false };
+        doc.items.push(todo.clone());                  // ← sync happens. App doesn't know.
+        self.caps.collab().emit(Typing { .. });        // ephemeral fanout, same deal
+        Ok(todo)
+    }
 }
 ```
 
-Codegen deltas when the `collab` feature is on for the app:
+```rust
+// todo-render — reads and live updates; no fetch, no polling:
+let typing: impl Stream<Item = Typing> = collab.subscribe::<Typing>();
+let peers: Vec<Presence> = collab.presence();
+```
+
+Host wiring — the *only* place networking appears, and it's config, not code:
+
+```rust
+let caps = NativeCaps::new().with_collab(CollabConfig { url: env("MYAPP_SYNC") });
+```
+
+No URL / no `.with_collab` → the `Collab` capability degrades to a **local
+null impl**: same app code, single-player, zero network. "Optional" is
+wiring-enforced, never a code fork.
+
+**Two primitives, two semantics** — everything the app shares is one of them:
+
+| App writes/reads | Primitive | Semantics |
+|---|---|---|
+| `doc.items.push(..)` | automerge (CRDT) | durable, convergent, offline-buffered, replayed on reconnect |
+| `collab.emit(Typing{..})` | ephemeral fanout | at-most-once, dropped while offline (right for typing/cursors/toasts) |
+| `collab.presence()` | framework-synthesized join/leave | ephemeral, never in the CRDT |
+
+**Framework-owned, app never touches:** `Transport`, `PeerEvent`/`PeerCmd`,
+rooms (default = feature name), sync messages, reconnect/backoff, offline
+buffering, ladder selection (try T2, fall back to T1), persist debouncing,
+presence synthesis. The §3 reactor types are internal plumbing.
+
+Principles (mechanical, gabion-style):
+
+1. **Registration without wiring, same as everything else.** `#[collab]`
+   registers via linkme; the sync loop lives *inside* the `Collab` capability
+   impl in gabion-native/gabion-web — not in the app's host main(). (§8.3
+   resolved.)
+2. **Writes dirty automatically.** Mutation through a `Collab` handle marks
+   the doc dirty; the capability impl flushes (persist + sync) at the service
+   call boundary / on debounce. There is no `save()` or `broadcast()` to
+   forget — forgetting is unrepresentable, that's the wall.
+3. **Reads never block on the network.** `doc::<T>()` is local memory; there
+   is no async "fetch room state" API to accidentally write.
+
+Codegen deltas when a feature contains `#[collab]` items (apps without any:
+byte-identical output, same discipline as `#[surface]` opt-out):
 
 | Surface | Delta |
 |---|---|
-| core impl | state type becomes `automerge::AutoCommit`-backed instead of plain struct; fn bodies unchanged (they mutate via a `Doc` capability wrapper) |
-| server | + `GET /collab/ws/{room}` upgrade; relay + durable replica |
+| core impl | `Caps` gains `type Collab: Collab`; impl gains the `collab()` handle |
+| server | + `GET /collab/ws/{room}` upgrade; relay + durable replica (auto, via linkme) |
 | client (generated) | unchanged signatures — mutations still go through the trait |
-| render | + presence/party-cursor data via a `subscribe`-shaped read [OPEN: read-your-writes vs streamed presence, §8] |
-| CLI | + `myapp collab join/leave/status` subcommands |
+| render | + `subscribe`/`presence` reads via the stream contract (§4.4) |
+| CLI | + `myapp collab status` (diagnostics only — the app didn't write it) |
 
-Apps without `#[collab]` anywhere: macro emits byte-identical code. The feature
-is *mechanically invisible* when unused — same discipline as `#[surface]`
-opt-out.
+### 4.3 Typed collab structures (the hard part, now named)
 
-### 4.3 Document granularity — [OPEN, the big one]
+`#[derive(Collab)]` maps typed Rust onto the schemaless automerge tree — this
+*is* the design work §8.4 points at:
+
+- plain fields (scalars/small structs) → LWW put at path `field`
+- `CollabVec<T>` → automerge sequence (RGA: concurrent inserts both survive)
+- `CollabMap<K, V>` → automerge map (merge per key)
+- `CollabText` → automerge text (char-level merge)
+
+Codegen is serde-style but emits automerge ops (`put_scalar`/`put_map`/
+`insert`), not JSON. [OPEN: v1 escape hatch — whole-struct serde blob at one
+key (LWW per field, coarse but correct) so the derive can be refined
+incrementally?]
+
+### 4.4 Peer events
+
+- **At-most-once**, fire-and-forget; dropped while offline. Correct for
+  typing indicators, cursors, toasts, "user joined" sounds — and wrong for
+  anything the user would call data. That's what the doc is for.
+- `subscribe::<E>()` returns a `futures::Stream` — this is the wedge that
+  forces the framework's undefined stream contract (framework spec §2).
+  Budget it in v1.
+- Presence is a built-in event stream, not app code: the framework synthesizes
+  join/leave/snapshot from the room protocol (§7).
+
+### 4.5 Document granularity — [OPEN, the big one]
 
 One automerge doc per **room**, room ≈ feature aggregate (`"todos"`), not per
 entity and not per app.
@@ -216,12 +306,13 @@ a genuinely elegant sentence and needs no new machinery.
 
 ## 7. Presence
 
-Copy p2piano verbatim: `RoomJoined { self_user_id, users }`, `UserJoined`,
-`UserLeft`, `PresenceSnapshot` on reconnect. Presence is ephemeral (not in the
-CRDT — it must not persist). Carried as separate envelope messages, surfaced
-to render via a presence channel [OPEN: how render sees presence without a
-poll — likely a `Stream` capability, ties into framework §2 no-streaming
-non-goal; collab is the wedge that forces the streaming contract shape].
+Copy p2piano's wire shape verbatim: `RoomJoined { self_user_id, users }`,
+`UserJoined`, `UserLeft`, `PresenceSnapshot` on reconnect. Presence is
+ephemeral (not in the CRDT — it must not persist). The framework synthesizes
+it from the room protocol and surfaces it as `collab.presence()` + a
+`PresenceEvent` stream (§4.4) — the app writes zero presence code. The old
+[OPEN] on how render sees presence is resolved by the stream contract in
+§4.4.
 
 ## 8. The honest tensions (where it actually hurts)
 
@@ -234,17 +325,16 @@ non-goal; collab is the wedge that forces the streaming contract shape].
 2. **Presence needs streaming** (§7) — collab is the first real demand for the
    framework's reserved-but-undefined stream contract. Budget for designing
    `Stream` in v1, not v2.
-3. **Sync loop ownership.** The reactor must be pumped even when no service fn
-   is called (peer messages arrive, timers fire). Each host grows a ~30-line
-   `collab_loop(transport, reactor, store)` in main. Hosts are "composition
-   only" per the lint rule — a loop that only calls capability traits and the
-   reactor is composition, so the wall holds, but `fw check`'s "no logic in
-   hosts" rule needs an explicit carve-out definition.
+3. **Sync loop ownership.** ~~Each host grows a ~30-line `collab_loop` in
+   main.~~ **Resolved by the DX bar (§4.2):** the loop lives inside the
+   `Collab` capability impls (gabion-native: tokio task; gabion-web: JS task),
+   auto-wired when the host calls `.with_collab(..)`. Hosts stay composition-
+   only; `fw check` needs no carve-out.
 4. **Automerge doc shape vs service DTOs.** Service fns take typed DTOs; the
-   doc is a dynamic automerge tree. The `Doc` capability wrapper (typed put/
-   delete against paths like `todos.{id}.title`) is the real design work left —
-   it's where "typed service" meets "schemaless CRDT". p2piano's room document
-   is a small precedent; gabion needs a repeatable pattern.
+   doc is a dynamic automerge tree. The `#[derive(Collab)]` design (§4.3) is
+   the real design work left — it's where "typed service" meets "schemaless
+   CRDT". p2piano's room document is a small precedent; gabion needs a
+   repeatable, *derived* pattern.
 5. **`Vec<u8>` in a JSON-string Store**: base64 bloat. Either accept it in v1
    or widen `Store` to bytes. [OPEN: widen now — it's a 3-line trait change and
    every future binary payload benefits.]
@@ -255,10 +345,12 @@ non-goal; collab is the wedge that forces the streaming contract shape].
    store todos in an `AutoCommit`, `cargo build -p todo-core --target
    wasm32-unknown-unknown && cargo clippy --workspace`. Expected: green on
    first try (p2piano proves it). This de-risks the entire premise.
-2. **E2 — two replicas, zero network** (1 day): `gabion-collab` reactor + T0
-   in-memory transport; deterministic test: two replicas, interleaved offline
-   edits, pump messages, assert `doc == doc'`. This is the conformance-suite
-   seed for collab.
+2. **E2 — two replicas, zero network** (1–2 days): `gabion-collab` reactor + T0
+   in-memory transport + the `Collab` capability with the §4.2 handle API
+   (`doc::<T>()`, `emit`; blob-first derive is fine). Deterministic test: two
+   replicas, interleaved offline edits, pump messages, assert `doc == doc'` —
+   *through the app-facing API*, so the DX is proven before any network code
+   exists. This is the conformance-suite seed for collab.
 3. **E3 — WS relay** (1–2 days): `GET /collab/ws/{room}` in host-server
    (axum WS), T1 transport in gabion-native + gabion-web. Native CLI peer +
    browser peer converge through the server. This is "p2piano's server,
@@ -268,15 +360,17 @@ non-goal; collab is the wedge that forces the streaming contract shape].
    T1 on failure. Do browser↔browser first (browser API is free), then the
    `str0m` native peer — the native↔browser convergence test is the proof
    that P2P is peer-type-agnostic.
-5. **E5 — `#[collab]` codegen** (after E1–E3 prove the runtime): macro emits
-   the WS route + doc wrapper; `fw` scaffolds a collab feature.
+5. **E5 — `#[collab]` codegen + derive** (after E1–E3 prove the runtime):
+   macro emits the WS route + auto-wires the capability into all hosts;
+   `#[derive(Collab)]` v1 (blob or field-level per §4.3); `fw` scaffolds a
+   collab feature.
 
 Order matters: E1–E2 are pure and cheap and kill the two scariest unknowns
 (wasm-safety, convergence determinism) before any network code exists.
 
 ## 10. Open decisions
 
-1. Doc granularity default: per-feature room (§4.3) — sign-off.
+1. Doc granularity default: per-feature room (§4.5) — sign-off.
 2. Consistency posture: eventual-only vs per-fn strong escape hatch (§8.1).
 3. `Store` widen to `Vec<u8>` now or base64 in v1 (§8.5).
 4. Native WebRTC impl: `str0m` (minimal, pure Rust, we own ICE/SDP glue) vs
@@ -290,3 +384,7 @@ Order matters: E1–E2 are pure and cheap and kill the two scariest unknowns
    confirm it stays that simple).
 8. Automerge version pin: p2piano is on 0.9; check 0.9→latest for sync-protocol
    wire breaks before E3 freezes the envelope.
+9. Derive granularity: field-level automerge ops from day 1, or serde-blob
+   escape hatch in v1 (§4.3)?
+10. Event semantics: is at-most-once forever, or does anything need
+    `#[collab(event(buffered))]` with a small reconnect replay?
