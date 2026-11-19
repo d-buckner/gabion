@@ -17,8 +17,8 @@ pub use serde_json;
 
 pub mod prelude {
     pub use crate::async_trait;
-    pub use crate::caps::{Caps, Clock, Store};
-    pub use crate::error::{ErrorKind, ServiceError};
+    pub use crate::caps::{Caps, Clock, Random, Store};
+    pub use crate::error::{ErrorKind, ServiceError, WireError};
     pub use crate::service;
     pub use serde::{Deserialize, Serialize};
 }

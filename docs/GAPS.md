@@ -13,42 +13,21 @@ Ordered by how much damage the silence does.
 
 ## 1. Fail-open defaults (worst class: it passes and means nothing)
 
-### 1.1 Errors cannot cross the wire
+Nothing open. The two that were here — the error kind dropped at the wire, and
+second-resolution ids silently overwriting records — are closed, with tests, and
+recorded in §7.
 
-`crates/gabion/src/error.rs:44` — `#[derive(Debug, Serialize)]` with
-`#[serde(skip)] pub kind_code: ErrorKind`. There is no `Deserialize`, no
-`Display`, no `impl std::error::Error`.
+## 2. Missing capabilities
 
-Consequence: `ErrorKind` — the thing that maps to HTTP status, MCP error code
-and CLI exit code — is dropped on serialization and can never be recovered at
-the client. A remote caller sees a string and guesses. The spec's "one error
-enum, one mapping, everywhere" is true in-process and false across the network.
+`crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Random`, `Caps`. Not
+defined:
 
-Fix (signed off): a flat `WireError` with `ErrorKind` serialized, plus generated
-`From` impls in both directions. In-proc error stays rich.
-
-### 1.2 Two creates in the same second silently overwrite each other
-
-`example/features/todo/todo-core/src/lib.rs:35` — `let id = format!("t{}", now.0)`,
-where `now` is whole seconds. Two `create` calls in one second produce the same
-id, and the second `set()` replaces the first. No error, no trace.
-
-This is the same failure mode as the `unwrap_or_default()` data loss fixed in
-#2: silent overwrite, discovered by a missing record.
-
-Fix needs a capability that does not exist yet — see 2.1. A monotonic counter or
-random suffix sourced from `Caps` is the only pure option; `std::time` is banned
-in core for good reason and `Clock` is deliberately coarse.
-
-## 2. Missing capabilities (these block 1.2 and more)
-
-`crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Caps`. Not defined:
-
-- **`Random` / `IdGen`** — required for any pure id generation (1.4).
-- **`Sleep` / `Timeout`** — no testable way to express waiting.
+- **`Sleep` / `Timeout`** — no testable way to express waiting, so any retry or
+  debounce logic would have to fake it.
 - **`Http`** — a core cannot call another service, so the feature wall's
   "cross-feature calls go through the generated client" has no capability to
-  travel on.
+  travel on. This is also what the wasm thin-client posture (spec §10.3) needs
+  before it can exist.
 
 ## 3. Claims ahead of code
 
@@ -98,6 +77,27 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 
 ## 7. Closed (kept here so nobody reopens them)
 
+- **Errors could not cross the wire.** `ServiceError<E>` derived `Serialize`
+  only, with `kind_code` marked `#[serde(skip)]` — so the one field that maps
+  to HTTP status, MCP code and exit code was dropped at every boundary, and a
+  remote caller had a string to guess from. Now: `ErrorKind` serializes by
+  name, `WireError` is flat and bidirectional (`from_service` /
+  `into_service_error`), `ServiceError` has `Display` + `std::error::Error`, and
+  the generated HTTP surface emits `WireError` for *every* failure including a
+  body that will not parse. A client that knows the app's error enum recovers
+  the typed error; one that does not still gets kind and message. Proven by
+  `crates/gabion/src/error.rs` tests and by `POST /todo/complete` on a missing
+  id.
+  Deviation from the signed-off plan: the conversions are generic impls in the
+  runtime rather than code the macro generates per service — same effect, less
+  codegen, and nothing for an app to regenerate when the runtime changes.
+- **Two creates in the same second overwrote each other.** Ids were
+  `format!("t{}", now.0)` at whole-second resolution: the second `set()` replaced
+  the first, no error, discovered by a missing record. Fixed with a `Random`
+  capability (`Caps::random`) and a nonce in the id — `SystemRandom` (getrandom)
+  in the native effect home, deterministic `MockRandom` in tests, so id
+  behaviour is reproducible. Proven by `two_creates_in_the_same_second_do_not_collide`
+  and `ids_are_reproducible_under_test_caps`.
 - **`#[surface(...)]` was parsed and thrown away**, so `#[surface(cli)]` still
   emitted an HTTP route, while the gate validated surface names the macro did
   not honor. **Removed, not fixed.** There are no per-method surface
@@ -117,12 +117,13 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 
 ## 8. Gate's own gaps
 
-- **CI does not actually run.** `.forgejo/workflows/ci.yml` is valid and the
+- **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
   commit status appears on PRs, but it sits at *Pending* indefinitely and
   `fj actions tasks` reports no tasks — no runner is registered on the instance.
-  Until one is, the gate is enforced locally and by whoever reviews a PR, not by
-  the server. This is the difference between a wall and a drawing of a wall, so
-  it is the first thing to fix.
+  `.github/workflows/ci.yml` is configured for the move to GitHub and is the
+  same one command. Until one of the two actually executes, the gate is enforced
+  locally and by whoever reviews a PR. This is the difference between a wall and
+  a drawing of a wall, so it is the first thing to fix.
 - `cargo shear` and `cargo deny` are assumed installed; CI installs them, a fresh
   laptop does not have them. `gabion check` reports the step as failed rather
   than "tool missing", which is misleading.
@@ -138,7 +139,9 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 
 ## 9. Cheapest fixes available
 
-- Register a CI runner (§8) — until then the gate is a local promise.
+- Register a CI runner (§8) — until then the gate is a local promise. GitHub
+  Actions is configured (`.github/workflows/ci.yml`) and just needs a repo to
+  run on.
 - `unsafe_code = "forbid"` in `[workspace.lints.rust]`: one line, and the spec
   already claims it.
 - A `Random`/`IdGen` capability, which unblocks the id collision in 1.2.

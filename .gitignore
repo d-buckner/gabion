@@ -1,3 +1,6 @@
 /target
-Cargo.lock
 *.store.json
+
+# Cargo.lock is deliberately tracked (it used to be ignored): this workspace
+# produces binaries, and `cargo deny` audits the exact versions that ship.
+# Ignoring it made CI resolve a different dependency graph on every run.

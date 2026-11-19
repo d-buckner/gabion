@@ -2,7 +2,7 @@
 //! Core tests never touch real time or disk — that's what makes them pure.
 
 use crate::async_trait;
-use crate::caps::{Caps, Clock, Store, StoreError, Timestamp};
+use crate::caps::{Caps, Clock, Random, Store, StoreError, Timestamp};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -59,11 +59,44 @@ impl Store for InMemoryStore {
     }
 }
 
+/// Deterministic randomness: a counter through a mixing function, so ids look
+/// scattered but a test run is reproducible bit for bit.
+#[derive(Clone, Default)]
+pub struct MockRandom {
+    state: Arc<Mutex<u64>>,
+}
+
+impl MockRandom {
+    #[must_use]
+    pub fn new(seed: u64) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(seed)),
+        }
+    }
+}
+
+#[async_trait]
+impl Random for MockRandom {
+    async fn next_u64(&self) -> u64 {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // splitmix64 step: cheap, well-mixed, and identical on every target.
+        *guard = guard.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = *guard;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+
 /// Test capability bundle.
 #[derive(Clone)]
 pub struct TestCaps {
     clock: MockClock,
     store: InMemoryStore,
+    random: MockRandom,
 }
 
 impl TestCaps {
@@ -72,6 +105,7 @@ impl TestCaps {
         Self {
             clock: MockClock(Timestamp(1_700_000_000)),
             store: InMemoryStore::default(),
+            random: MockRandom::new(0x5EED),
         }
     }
 }
@@ -85,10 +119,14 @@ impl Default for TestCaps {
 impl Caps for TestCaps {
     type Clock = MockClock;
     type Store = InMemoryStore;
+    type Random = MockRandom;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
     fn store(&self) -> &Self::Store {
         &self.store
+    }
+    fn random(&self) -> &Self::Random {
+        &self.random
     }
 }

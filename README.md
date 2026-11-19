@@ -130,14 +130,15 @@ v0.1 skeleton, working end to end. The todo example runs as a native binary
 to `wasm32-unknown-unknown`. `host-web` compiles for wasm but has no bundler
 config yet, so treat it as compile-proof, not a shipped browser app.
 
-**Built:** `#[service]` codegen (clap + axum), the capability and error model,
-`gabion check` with tests proving each rule bites, CI, and the effect ban across
-threads / env / process / fs / net.
+**Built:** `#[service]` codegen (clap + axum), the capability model (`Clock`,
+`Store`, `Random`) with native and deterministic test impls, an error model that
+survives the wire (`WireError`), `gabion check` with tests proving each rule
+bites, CI, and the effect ban across threads / env / process / fs / net.
 
 **Not built yet:** the MCP surface, the generated typed client, `gabion new`
-scaffolding, per-call `Ctx`, and error round-tripping over the wire
-(`WireError`). See [docs/GAPS.md](docs/GAPS.md) for the full inspection log —
-including the places a wall is claimed but not yet enforced — and
-`docs/framework-spec.md` for the signed-off decisions behind each.
+scaffolding, and per-call `Ctx` (so authorization is currently unrepresentable).
+See [docs/GAPS.md](docs/GAPS.md) for the full inspection log — including the
+places a wall is claimed but not yet enforced — and `docs/framework-spec.md` for
+the signed-off decisions behind each.
 
 MIT or Apache-2.0 dual licensed.
