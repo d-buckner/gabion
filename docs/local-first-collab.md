@@ -28,7 +28,8 @@ feature; apps that don't, compile the same binary they always did.
 
 - No mobile targets (consistent with framework spec §2).
 - No E2EE room keys in v1 [OPEN: v1.1 — invite-URL key fragment is cheap].
-- No native↔native WebRTC in v1 (WS relay covers it; iroh/quinn later).
+- No iroh/quinn native overlay in v1 — native P2P rides WebRTC (see §5.1),
+  which covers every peer combination with one protocol.
 - No CRDT schema language — automerge *is* the schema.
 - No replacing the four surfaces. HTTP/MCP/CLI stay; collab is additive.
 
@@ -42,7 +43,7 @@ do the policing. Collab slots in without bending a single rule:
 | `automerge` crate | `*-core` deps | Pure Rust, no tokio/fs/net, wasm-safe (proven: p2piano-client builds it to wasm). The effect ban doesn't blink. |
 | Sync state machine | `gabion-collab` (pure, wasm-safe) | automerge's `sync::State` + `generate_message`/`receive_message` is *already* a pure input→output state machine. No clock, no socket inside. |
 | WebSocket client | capability impl: `gabion-native` (tokio-tungstenite), `gabion-web` (browser WS via wasm-bindgen) | Networking is an effect → lives in the effect home, same as `FileStore`. |
-| WebRTC DataChannel | `gabion-web` only | Browser-native P2P; native hosts just don't wire this impl. |
+| WebRTC DataChannel | `gabion-web` (browser `RTCDataChannel` via `web_sys`) + `gabion-native` (`str0m`, pure-Rust WebRTC, data channels) | Browsers can *only* P2P via WebRTC, so WebRTC-everywhere is the single protocol that covers browser↔browser, browser↔native, and native↔native. |
 | Signaling/relay server | `host-server` (axum WS upgrade) | Hosts are the composition + effect layer; axum already lives there. |
 | Persistence of the doc | `Store` capability (already exists) | automerge `save()` → bytes → the same key-value store the app already has. |
 
@@ -77,6 +78,7 @@ and zero network — determinism preserved.
 ```
 crates/gabion-collab/    # pure: sync reactor, room/presence types, wire protocol
 crates/gabion-native/    # + WsTransport (tokio-tungstenite)          [feature "collab"]
+                         # + WebRtcTransport (str0m)                  [feature "collab-p2p"]
 crates/gabion-web/       # NEW: browser WS + WebRTC DataChannel impls [feature "collab"]
 ```
 
@@ -154,8 +156,21 @@ by `sync`.
 |---|---|---|---|
 | T0 | in-process loopback | tests, single-binary demo | build first |
 | T1 | WS relay via host-server | always works; server is durable peer | v1 |
-| T2 | WebRTC DataChannel, WS = signaling only | browser↔browser, low latency | v1/v1.1 (p2piano protocol already has `WebRtcSignal`) |
-| T3 | native↔native direct (iroh/quinn) | LAN / NAT-punched native peers | v2 [OPEN: iroh vs plain QUIC vs skip] |
+| T2 | WebRTC DataChannel, WS = signaling only | **all** peer pairs: browser↔browser (`web_sys`), browser↔native + native↔native (`str0m` in gabion-native) | v1.1 (p2piano protocol already has `WebRtcSignal`) |
+| T3 | iroh/quinn native overlay | optional native↔native upgrade (better hole-punching, persistent node IDs) | v2 [OPEN: only if native↔native outgrows WebRTC; cannot interop with browsers, so never a substitute for T2] |
+
+Two consequences worth stating plainly:
+
+1. **WebRTC-everywhere is forced, not chosen.** A browser can only do P2P over
+   WebRTC (WebTransport is client→server only — the responder would need to
+   host a TLS server behind NAT). So the only protocol that achieves true P2P
+   for *every* peer combination is WebRTC on both sides. Native speaks WebRTC
+   via `str0m` (pure Rust, data-channel capable, no C deps — keeps the
+   single-binary promise) or `webrtc-rs`.
+2. **No TURN infrastructure needed.** When ICE hole punching fails, the pair
+   falls back to T1 — gabion's own WS relay *is* the relay. The framework
+   ships its own TURN. (TURN servers remain an option for deployments that
+   want them; the ICE config is just another host-wired capability.)
 
 `Transport` trait (in `gabion`, next to `Store`):
 
@@ -249,8 +264,10 @@ non-goal; collab is the wedge that forces the streaming contract shape].
    browser peer converge through the server. This is "p2piano's server,
    generalized."
 4. **E4 — WebRTC upgrade** (2–3 days): port p2piano's `WebRtcSignal` flow;
-   browser↔browser DataChannel carries `sync`, WS demoted to signaling;
-   automatic fallback to T1 on failure.
+   DataChannel carries `sync`, WS demoted to signaling; automatic fallback to
+   T1 on failure. Do browser↔browser first (browser API is free), then the
+   `str0m` native peer — the native↔browser convergence test is the proof
+   that P2P is peer-type-agnostic.
 5. **E5 — `#[collab]` codegen** (after E1–E3 prove the runtime): macro emits
    the WS route + doc wrapper; `fw` scaffolds a collab feature.
 
@@ -262,8 +279,9 @@ Order matters: E1–E2 are pure and cheap and kill the two scariest unknowns
 1. Doc granularity default: per-feature room (§4.3) — sign-off.
 2. Consistency posture: eventual-only vs per-fn strong escape hatch (§8.1).
 3. `Store` widen to `Vec<u8>` now or base64 in v1 (§8.5).
-4. Native P2P v2: iroh (magicsock, DERP-like relays, more deps) vs bare QUIC +
-   our WS signaling vs "T2 is browser-only forever, native stays on T1".
+4. Native WebRTC impl: `str0m` (minimal, pure Rust, we own ICE/SDP glue) vs
+   `webrtc-rs` (batteries included, heavier). Decide at E4; the `Transport`
+   trait makes it swappable. iroh stays a v2 maybe for native↔native only.
 5. Room auth: open rooms + capability tokens? Ties into gabion's auth story
    which doesn't exist yet — collab shouldn't invent it alone.
 6. E2EE: per-room key in invite URL fragment, encrypt `sync` payloads; cheap
