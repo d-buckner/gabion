@@ -11,11 +11,31 @@
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 
 use gabion::async_trait;
-use gabion::caps::{Caps, Clock, Timestamp};
+use gabion::caps::{Caps, Clock, Random, Timestamp};
 use gabion::testing::InMemoryStore;
 
 pub mod filestore;
 pub use filestore::FileStore;
+
+/// OS entropy — the native impl of `Random`.
+#[derive(Clone)]
+pub struct SystemRandom;
+
+#[async_trait]
+impl Random for SystemRandom {
+    async fn next_u64(&self) -> u64 {
+        let mut buf = [0u8; 8];
+        // No RNG is worse than a slow one for id uniqueness, and a host that
+        // cannot read entropy has bigger problems than its id scheme.
+        if getrandom::fill(&mut buf).is_err() {
+            return std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(0);
+        }
+        u64::from_le_bytes(buf)
+    }
+}
 
 /// Wall clock from `std::time` — the native impl. Core code only sees `Clock`.
 #[derive(Clone)]
@@ -38,6 +58,7 @@ impl Clock for SystemClock {
 pub struct NativeCaps {
     clock: SystemClock,
     store: InMemoryStore,
+    random: SystemRandom,
 }
 
 impl NativeCaps {
@@ -46,6 +67,7 @@ impl NativeCaps {
         Self {
             clock: SystemClock,
             store: InMemoryStore::default(),
+            random: SystemRandom,
         }
     }
 }
@@ -59,11 +81,15 @@ impl Default for NativeCaps {
 impl Caps for NativeCaps {
     type Clock = SystemClock;
     type Store = InMemoryStore;
+    type Random = SystemRandom;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
     fn store(&self) -> &Self::Store {
         &self.store
+    }
+    fn random(&self) -> &Self::Random {
+        &self.random
     }
 }
 
@@ -72,6 +98,7 @@ impl Caps for NativeCaps {
 pub struct FileCaps {
     clock: SystemClock,
     store: FileStore,
+    random: SystemRandom,
 }
 
 impl FileCaps {
@@ -79,6 +106,7 @@ impl FileCaps {
         Ok(Self {
             clock: SystemClock,
             store: FileStore::new(path)?,
+            random: SystemRandom,
         })
     }
 }
@@ -86,11 +114,15 @@ impl FileCaps {
 impl Caps for FileCaps {
     type Clock = SystemClock;
     type Store = FileStore;
+    type Random = SystemRandom;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
     fn store(&self) -> &Self::Store {
         &self.store
+    }
+    fn random(&self) -> &Self::Random {
+        &self.random
     }
 }
 

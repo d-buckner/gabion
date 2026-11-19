@@ -13,7 +13,7 @@
 //! - the trait itself, made `async_trait` (dyn-compatible)
 //! - `server` feature: an axum `Router` with one POST per method
 //!   (`POST /<ns>.<method>`), JSON in, `Result` envelope out, error enum ->
-//!   HTTP status via `ServiceError::kind_code`.
+//!   HTTP status via `ErrorKind::http_status`, body is a flat `WireError`.
 //! - `cli` feature: a clap `Command` + async dispatch; input arrives as
 //!   `--json '<input>'` (v1), error enum -> process exit code.
 //!
@@ -169,12 +169,15 @@ fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
                 let input: #ty = match ::gabion::serde_json::from_slice(&body) {
                     Ok(v) => v,
                     Err(err) => {
+                        // Same envelope as a service error, so a client parses
+                        // one shape for every failure.
+                        let wire = ::gabion::error::WireError::new(
+                            ::gabion::error::ErrorKind::InvalidInput,
+                            err.to_string(),
+                        );
                         return (
                             ::axum::http::StatusCode::BAD_REQUEST,
-                            ::axum::Json(::gabion::serde_json::json!({
-                                "kind": "invalid_input",
-                                "message": err.to_string(),
-                            })),
+                            ::axum::Json(wire),
                         )
                             .into_response()
                     }
@@ -191,9 +194,19 @@ fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
                 match svc.#id(input).await {
                     Ok(v) => (::axum::http::StatusCode::OK, ::axum::Json(&v)).into_response(),
                     Err(e) => {
-                        let status = ::axum::http::StatusCode::from_u16(e.kind_code.http_status())
+                        let status = ::axum::http::StatusCode::from_u16(e.kind.http_status())
                             .unwrap_or(::axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-                        (status, ::axum::Json(&e)).into_response()
+                        // A detail that will not serialize must not swallow the
+                        // error: send the kind and message, which is all a
+                        // client is guaranteed to understand anyway.
+                        let wire = ::gabion::error::WireError::from_service(&e)
+                            .unwrap_or_else(|_| {
+                                ::gabion::error::WireError::new(
+                                    ::gabion::error::ErrorKind::Internal,
+                                    "error detail failed to serialize",
+                                )
+                            });
+                        (status, ::axum::Json(wire)).into_response()
                     }
                 }
             }
@@ -276,7 +289,7 @@ fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
             Some((#name, sm)) => #call
                 .map(|v| ::gabion::serde_json::to_string_pretty(&v).unwrap_or_default())
                 .map_err(|e| ::gabion::cli::CliExit {
-                    code: e.kind_code.exit_code(),
+                    code: e.kind.exit_code(),
                     message: e.message.clone(),
                 }),
         }

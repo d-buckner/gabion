@@ -21,6 +21,13 @@ impl<C: Caps> TodoServiceImpl<C> {
     fn key(id: &str) -> String {
         format!("todo/{id}")
     }
+
+    /// Short unpredictable suffix for ids. The clock alone is not an id: two
+    /// creates in the same second used to collide, and the second silently
+    /// overwrote the first.
+    async fn nonce(&self) -> String {
+        format!("{:08x}", self.caps.random().next_u64().await as u32)
+    }
 }
 
 fn internal() -> TodoErr {
@@ -34,7 +41,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             return Err(todo_err(TodoError::EmptyTitle));
         }
         let now = self.caps.clock().now().await;
-        let id = format!("t{}", now.0);
+        let id = format!("t{}-{}", now.0, self.nonce().await);
         let todo = Todo {
             id: id.clone(),
             title: input.title,
@@ -121,15 +128,45 @@ mod tests {
             .create(CreateTodo { title: "  ".into() })
             .await
             .unwrap_err();
-        assert_eq!(e.kind_code, ErrorKind::InvalidInput);
-        assert_eq!(e.kind_code.http_status(), 400);
+        assert_eq!(e.kind, ErrorKind::InvalidInput);
+        assert_eq!(e.kind.http_status(), 400);
     }
 
     #[tokio::test]
     async fn complete_missing_is_404() {
         let svc = TodoServiceImpl::new(TestCaps::new());
         let e = svc.complete(TodoId("nope".into())).await.unwrap_err();
-        assert_eq!(e.kind_code.http_status(), 404);
-        assert_eq!(e.kind_code.exit_code(), 3);
+        assert_eq!(e.kind.http_status(), 404);
+        assert_eq!(e.kind.exit_code(), 3);
+    }
+
+    /// The clock is frozen, so every create lands in the same second — exactly
+    /// the case that used to overwrite the first record with the second, in
+    /// silence.
+    #[tokio::test]
+    async fn two_creates_in_the_same_second_do_not_collide() {
+        let svc = TodoServiceImpl::new(TestCaps::new());
+        let a = svc.create(CreateTodo { title: "a".into() }).await.unwrap();
+        let b = svc.create(CreateTodo { title: "b".into() }).await.unwrap();
+        assert_ne!(a.id, b.id, "ids collided within one clock tick");
+        assert_eq!(
+            svc.list(()).await.unwrap().len(),
+            2,
+            "a record was silently overwritten"
+        );
+    }
+
+    /// Determinism is the other half of the capability: same seed, same ids,
+    /// so a failing test stays failing.
+    #[tokio::test]
+    async fn ids_are_reproducible_under_test_caps() {
+        let make = || async {
+            TodoServiceImpl::new(TestCaps::new())
+                .create(CreateTodo { title: "x".into() })
+                .await
+                .unwrap()
+                .id
+        };
+        assert_eq!(make().await, make().await);
     }
 }
