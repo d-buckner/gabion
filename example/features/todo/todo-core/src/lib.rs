@@ -4,7 +4,7 @@
 //! Proof: `cargo build -p todo-core --target wasm32-unknown-unknown` passes.
 //! Add `std::time::SystemTime::now()` anywhere here and it fails to compile.
 
-use sietch::prelude::*;
+use gabion::prelude::*;
 use todo_api::{todo_err, CreateTodo, Todo, TodoErr, TodoError, TodoId, TodoService};
 
 pub struct TodoServiceImpl<C: Caps> {
@@ -39,7 +39,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             done: false,
             created_at: now.0,
         };
-        let json = sietch::serde_json::to_string(&todo).unwrap_or_default();
+        let json = gabion::serde_json::to_string(&todo).unwrap_or_default();
         self.caps
             .store()
             .set(&Self::key(&id), &json)
@@ -56,10 +56,10 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             .await
             .map_err(|_| internal())?;
         let mut todo = raw
-            .and_then(|s| sietch::serde_json::from_str::<Todo>(&s).ok())
+            .and_then(|s| gabion::serde_json::from_str::<Todo>(&s).ok())
             .ok_or_else(|| todo_err(TodoError::NotFound))?;
         todo.done = true;
-        let json = sietch::serde_json::to_string(&todo).unwrap_or_default();
+        let json = gabion::serde_json::to_string(&todo).unwrap_or_default();
         self.caps
             .store()
             .set(&Self::key(&todo.id), &json)
@@ -77,7 +77,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             .map_err(|_| internal())?;
         Ok(items
             .iter()
-            .filter_map(|(_, v)| sietch::serde_json::from_str::<Todo>(v).ok())
+            .filter_map(|(_, v)| gabion::serde_json::from_str::<Todo>(v).ok())
             .collect())
     }
 
@@ -90,7 +90,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use sietch::testing::TestCaps;
+    use gabion::testing::TestCaps;
 
     #[tokio::test]
     async fn create_list_complete() {

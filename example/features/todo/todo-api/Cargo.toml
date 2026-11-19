@@ -11,7 +11,7 @@ server = ["dep:axum", "dep:bytes"]
 cli = ["dep:clap"]
 
 [dependencies]
-sietch = { workspace = true }
+gabion = { workspace = true }
 serde = { workspace = true }
 axum = { workspace = true, optional = true }
 bytes = { version = "1", optional = true }

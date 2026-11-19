@@ -1,0 +1,6 @@
+# Standardized toolchain: rustup-managed stable (never brew rust).
+# rustup auto-provisions the channel and targets listed here.
+[toolchain]
+channel = "stable"
+targets = ["wasm32-unknown-unknown"]
+components = ["clippy", "rustfmt"]

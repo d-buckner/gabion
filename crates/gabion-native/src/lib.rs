@@ -1,8 +1,8 @@
 //! Native capability implementations (host-side; std::time allowed HERE, never in core).
 
-use sietch::async_trait;
-use sietch::caps::{Caps, Clock, Timestamp};
-use sietch::testing::InMemoryStore;
+use gabion::async_trait;
+use gabion::caps::{Caps, Clock, Timestamp};
+use gabion::testing::InMemoryStore;
 
 pub mod filestore;
 pub use filestore::FileStore;
@@ -64,7 +64,7 @@ pub struct FileCaps {
 }
 
 impl FileCaps {
-    pub fn new(path: impl Into<std::path::PathBuf>) -> Result<Self, sietch::caps::StoreError> {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Result<Self, gabion::caps::StoreError> {
         Ok(Self { clock: SystemClock, store: FileStore::new(path)? })
     }
 }
@@ -80,4 +80,4 @@ impl Caps for FileCaps {
     }
 }
 
-// (StoreError stays at sietch::caps::StoreError — hosts use that path.)
+// (StoreError stays at gabion::caps::StoreError — hosts use that path.)

@@ -1,13 +1,13 @@
 //! Native host: wires NativeCaps into the service impl, hands the trait object
-//! to the generated CLI and to the render code. Zero business logic here.
+//! to the generated CLI, the terminal renderer, and the Dioxus desktop window.
+//! Zero business logic here.
 
 use std::sync::Arc;
 use todo_api::TodoService;
 use todo_core::TodoServiceImpl;
 
-#[tokio::main]
-async fn main() {
-    let caps = sietch_native::FileCaps::new(std::env::var("MYAPP_STORE")
+fn main() {
+    let caps = gabion_native::FileCaps::new(std::env::var("MYAPP_STORE")
         .unwrap_or_else(|_| "myapp.store.json".into()))
         .unwrap_or_else(|e| {
             eprintln!("cannot open store: {e}");
@@ -20,19 +20,42 @@ async fn main() {
         .subcommand(todo_api::__todo_cli::todo_cli_command())
         .subcommand(
             clap::Command::new("ui").about("render the todo list (demo of render crate)"),
-        );
+        )
+        .subcommand(clap::Command::new("gui").about("open the Dioxus desktop window"));
     let matches = cmd.clone().get_matches();
 
-    let result: Result<String, sietch::cli::CliExit> = match matches.subcommand() {
-        Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref())
-            .await
-            .map_err(|e| sietch::cli::CliExit { code: e.kind_code.exit_code(), message: e.message }),
-        Some(("todo", m)) => todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), m).await,
-        _ => {
-            cmd.print_help().ok();
-            std::process::exit(0);
+    // GUI path: Dioxus owns its async runtime, so launch OUTSIDE any tokio rt.
+    if matches.subcommand_matches("gui").is_some() {
+        dioxus::LaunchBuilder::new()
+            .with_context(todo_render::Svc(dynsvc))
+            .with_cfg(dioxus::desktop::Config::new().with_window(
+                dioxus::desktop::WindowBuilder::new().with_title("myapp"),
+            ))
+            .launch(todo_render::TodoApp);
+        return;
+    }
+
+    // CLI paths: build the tokio runtime by hand (no #[tokio::main]).
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("cannot start runtime: {e}");
+            std::process::exit(1);
         }
     };
+
+    let result: Result<String, gabion::cli::CliExit> = rt.block_on(async {
+        match matches.subcommand() {
+            Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref())
+                .await
+                .map_err(|e| gabion::cli::CliExit { code: e.kind_code.exit_code(), message: e.message }),
+            Some(("todo", m)) => todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), m).await,
+            _ => {
+                cmd.print_help().ok();
+                std::process::exit(0);
+            }
+        }
+    });
 
     match result {
         Ok(out) => println!("{out}"),

@@ -1,14 +1,14 @@
-//! sietch runtime: capability traits, error model, prelude.
+//! gabion runtime: capability traits, error model, prelude.
 //!
 //! This crate must stay wasm-safe and runtime-free: no tokio, no std::fs/net/time.
-//! It is imported by every *-api and *-core crate in a sietch app.
+//! It is imported by every *-api and *-core crate in a gabion app.
 
 pub mod caps;
 pub mod cli;
 pub mod error;
 pub mod testing;
 
-pub use sietch_macros::service;
+pub use gabion_macros::service;
 
 /// Re-exported so app crates don't pin serde/serde_json themselves.
 pub use async_trait::async_trait;
