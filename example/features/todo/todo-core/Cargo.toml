@@ -5,6 +5,7 @@ edition.workspace = true
 # v0.1 ships as a git/path dependency; not published to crates.io yet.
 publish = false
 license.workspace = true
+authors.workspace = true
 description = "todo business logic. Pure: no tokio, no std::fs/net/time — compiles to wasm32."
 
 [dependencies]
