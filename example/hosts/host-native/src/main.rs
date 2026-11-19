@@ -53,7 +53,7 @@ fn main() {
             Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref())
                 .await
                 .map_err(|e| gabion::cli::CliExit {
-                    code: e.kind_code.exit_code(),
+                    code: e.kind.exit_code(),
                     message: e.message,
                 }),
             Some(("todo", m)) => todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), m).await,

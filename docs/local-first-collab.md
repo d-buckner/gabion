@@ -169,7 +169,8 @@ Principles (mechanical, gabion-style):
    is no async "fetch room state" API to accidentally write.
 
 Codegen deltas when a feature contains `#[collab]` items (apps without any:
-byte-identical output, same discipline as `#[surface]` opt-out):
+byte-identical output, same discipline as the surface lock: no codegen unless
+the feature asks for it):
 
 | Surface | Delta |
 |---|---|

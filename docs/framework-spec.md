@@ -110,17 +110,26 @@ pub struct CreateTodo { pub title: String }
 pub enum TodoError { #[code(404)] NotFound }
 
 #[service]                   // generates client, router, clap, mcp, openapi
-pub trait TodoService {
-    #[surface(cli, http, mcp)]
+pub trait TodoService {                 // the trait IS the boundary:
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoError>;
-
-    #[surface(cli, http)]
     async fn list(&self, q: ListQuery) -> Result<Vec<Todo>, TodoError>;
+}
 
-    #[internal]              // explicit opt-out; required or surface-completeness lint fails
+// DECIDED: no per-method surface attributes. Every method in a #[service] trait
+// is generated into every surface. An op that must not be remote lives outside
+// the trait — a plain trait here for cross-feature in-proc calls:
+pub trait TodoInternals {
     async fn recompute_stats(&self) -> ();
 }
+// ...or an inherent method on the impl in todo-core, reachable by nothing
+// outside the feature. Adapters hold Arc<dyn TodoService>, so neither is
+// reachable from any surface. Structure, not lint.
 ```
+
+Because there is no attribute to review, the reviewable artifact is the *set* of
+reachable operations: `gabion check` locks it in `.gabion/surfaces.lock` and
+fails when it drifts, so "this method is now callable by an agent" appears as a
+diff in the PR rather than in production.
 
 `#[service]` generates, feature-gated so each host compiles only what it needs:
 
@@ -144,11 +153,12 @@ docs and external codegen. [OPEN: CBOR/MessagePack as option for wasm payload si
 ## 6. Capabilities (effects)
 
 ```rust
-// features/todo/todo-core/src/caps.rs
-pub trait Caps {
-    type Clock: Clock;        // fn now(&self) -> Timestamp
-    type Store: Store;        // key-value/doc store; native: redb/sqlx, wasm: IndexedDB
-    // Sleep, Random, Http... each a small trait
+// crates/gabion/src/caps.rs — what exists today
+pub trait Caps: Clone + Send + Sync + 'static {
+    type Clock: Clock;    // fn now(&self) -> Timestamp (whole seconds, on purpose)
+    type Store: Store;    // async key-value of JSON strings
+    type Random: Random;  // fn next_u64(&self) -> u64; ids need entropy, not luck
+    // Sleep, Http — see docs/GAPS.md §2
 }
 
 pub struct TodoServiceImpl<C: Caps> { caps: C }
@@ -157,12 +167,17 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> { /* business logic */ }
 
 - Core is `async` but runtime-free: it returns futures; hosts drive them
   (tokio native, JS event loop on wasm). No tokio dependency in core.
-- Native host wires `NativeCaps` (tokio clock, redb/sqlx store).
-- Web host wires `WebCaps` (js Date, IndexedDB) — the web build can run core
-  **locally in the browser** (local-first) or just use the HTTP client. Both are
-  supported; per-app choice. [OPEN: default posture — local-first vs thin client]
-- Storage v1: abstract `Store` trait with a redb-backed native impl (pure Rust,
-  no C deps keeps the single-binary promise). sqlx left to the app.
+- Native host wires `NativeCaps` / `FileCaps` (`SystemClock`, in-memory or
+  file store, `SystemRandom` over getrandom).
+- Tests wire `TestCaps`: frozen clock, in-memory store, deterministic
+  `MockRandom` — which is what makes id-dependent behaviour reproducible rather
+  than flaky.
+- Web host wires `WasmCaps` (mock clock/store/random). It exists to prove the
+  wall compiles for wasm; the real `WebCaps` (js Date, IndexedDB, js crypto)
+  lands with the thin-client pass.
+- Storage v1: abstract `Store` trait; `FileStore` is the shipped native impl
+  (pure Rust, no C deps keeps the single-binary promise). redb/sqlx left to the
+  app.
 
 ## 7. Lint rulebook (Dune-style: ban the shortcut, not the person)
 
@@ -179,7 +194,8 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | effect without capability | same as above |
 | DTO defined in core | render compile error at the wall |
 | business logic in host crate | arch-lint: no type/fn definitions in hosts beyond wiring + main |
-| forgetting to expose an op | surface-completeness lint: every trait fn has `#[surface]` or `#[internal]` |
+| forgetting to expose an op | the trait is the boundary: any method in a `#[service]` trait is on every surface, so there is nothing to forget |
+| publishing an op by accident | `surface-snapshot`: `.gabion/surfaces.lock` must match the reachable method set |
 | hand-written HTTP handler bypassing contract | arch-lint: `axum` importable only in generated modules + host main |
 | unwrap/expect/panic in core | `clippy::unwrap_used`, `expect_used`, `implicit_clone` deny |
 | unsafe anywhere outside effects | `unsafe_code = "forbid"` workspace-wide |
@@ -227,7 +243,7 @@ Two deliberate deviations from the original plan:
 
 ```
 gabion/         # runtime: prelude, client traits, error model, capability traits
-gabion-macros/  # #[service], #[surface], #[GabionError]
+gabion-macros/  # #[service] (#[GabionError] derive is not built yet)
 gabion-native/  # native caps: SystemClock, FileStore (a declared effect home)
 gabion-cli/     # `gabion check` (built); `gabion new`, `gabion dev` (not yet)
 gabion-codegen/ # openapi export, contract snapshot (reviewable generated diff) [not built]
@@ -245,15 +261,23 @@ Signed off in the v0.1 audit:
    task-local. It is visible in the contract, trivially testable, and the
    generated adapters construct it. This deliberately breaks the "exactly one
    input argument" shape — accepted.
-2. **Errors round-trip via a separate `WireError` plus generated `From` impls.**
-   The in-proc error stays rich (thiserror); the wire type is flat and
-   bidirectional, and `ErrorKind` is serialized instead of `#[serde(skip)]`.
-   Today `ServiceError` cannot round-trip at all — this is the fix.
+2. **Errors round-trip via a separate `WireError` plus `From`-style
+   conversions.** Built. The in-proc error stays rich (thiserror-style typed
+   detail); the wire type is flat and bidirectional, and `ErrorKind` is
+   serialized instead of `#[serde(skip)]`. Conversions are generic runtime impls
+   rather than per-service codegen.
 3. **wasm browser posture: thin client over HTTP.** The render crate calls the
    generated HTTP client; core does not run in the browser. Local-first with
    IndexedDB/WebCaps is a later option, not the default.
 4. **Dune's comment ban is adopted, scoped to `*-core` fn bodies.** Doc comments
    on public items stay required — codegen and OpenAPI read them.
+5. **The trait is the boundary; there are no per-method surface attributes.**
+   Every method in a `#[service]` trait is generated into every surface. Ops
+   that must not be remote live outside the trait: a plain trait in `*-api` for
+   cross-feature in-proc calls, inherent methods on the impl for
+   feature-local internals. There is no opt-out for one surface — if it must not
+   be remote, it is not in the trait. The reviewable artifact is the locked set
+   of reachable ops (`.gabion/surfaces.lock`), not an annotation per method.
 
 Still open (see `docs/GAPS.md` for the full log, ordered by how much damage the
 silence does):

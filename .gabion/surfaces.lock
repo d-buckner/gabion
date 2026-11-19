@@ -1,0 +1,5 @@
+# gabion public surface. Every line is reachable over CLI, HTTP,
+# MCP and the typed client. Review changes here like an API change.
+todo-api::TodoService::complete
+todo-api::TodoService::create
+todo-api::TodoService::list

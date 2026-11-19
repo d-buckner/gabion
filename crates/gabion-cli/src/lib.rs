@@ -18,6 +18,7 @@ pub mod lint;
 pub mod report;
 pub mod source;
 pub mod steps;
+pub mod surfaces;
 
 use std::path::PathBuf;
 
@@ -33,6 +34,8 @@ pub struct Options {
     pub no_external: bool,
     /// wasm target for the per-core wall proof.
     pub wasm_target: String,
+    /// Rewrite `.gabion/surfaces.lock` instead of checking against it.
+    pub update_surfaces: bool,
 }
 
 impl Options {
@@ -43,6 +46,7 @@ impl Options {
             fast: false,
             no_external: false,
             wasm_target: "wasm32-unknown-unknown".to_string(),
+            update_surfaces: false,
         }
     }
 }
@@ -55,6 +59,7 @@ pub fn check(opts: &Options) -> Summary {
         "graph".to_string(),
         "edges".to_string(),
         "clippy.toml".to_string(),
+        "surfaces".to_string(),
         "sources".to_string(),
     ];
     let cfg = match Config::load(&opts.root) {
@@ -80,6 +85,7 @@ pub fn check(opts: &Options) -> Summary {
 
     let mut findings = edges::check(&graph, &cfg);
     findings.extend(clippy_cfg::check(&opts.root, &cfg));
+    findings.extend(surfaces::check(&graph, &opts.root, opts.update_surfaces));
     for krate in &graph.crates {
         findings.extend(lint::check_crate(krate, &cfg));
     }

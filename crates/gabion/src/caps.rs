@@ -34,11 +34,23 @@ pub enum StoreError {
     Io(String),
 }
 
+/// Source of unpredictability. Core code needs ids, and the two tempting
+/// shortcuts are both wrong: reading the clock twice and hoping (two writes in
+/// the same tick collide and overwrite silently), or `std::random`, which does
+/// not exist on wasm. Hosts wire a real entropy source; tests wire a
+/// deterministic one, which is what makes id-dependent code testable.
+#[async_trait]
+pub trait Random: Clone + Send + Sync + 'static {
+    async fn next_u64(&self) -> u64;
+}
+
 /// Bundle of capabilities a host injects into service impls.
 /// Apps extend this pattern with their own associated types per feature.
 pub trait Caps: Clone + Send + Sync + 'static {
     type Clock: Clock;
     type Store: Store;
+    type Random: Random;
     fn clock(&self) -> &Self::Clock;
     fn store(&self) -> &Self::Store;
+    fn random(&self) -> &Self::Random;
 }

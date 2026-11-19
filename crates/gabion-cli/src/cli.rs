@@ -47,6 +47,7 @@ impl Args {
             match rest[i].as_str() {
                 "--fast" => opts.fast = true,
                 "--no-external" => opts.no_external = true,
+                "--update-surfaces" => opts.update_surfaces = true,
                 "--target" => {
                     i += 1;
                     let target = rest.get(i).ok_or("--target needs a value")?;
@@ -73,20 +74,22 @@ fn help() -> Summary {
     let text = "\
 gabion — one business core, four surfaces
 
-  gabion check [--fast] [--no-external] [--root PATH] [--target TRIPLE]
+  gabion check [--fast] [--no-external] [--update-surfaces] [--root PATH] [--target TRIPLE]
 
   static rules (always):
     edge table        process wall, feature wall, upward leak, host purity
     clippy.toml       required effect bans and thresholds are still present
-    sources           #[surface] completeness, comment rule, silent defaults,
-                      #[allow] placement, file length, TODOs
+    surfaces          .gabion/surfaces.lock matches the reachable method set
+    sources           comment rule, silent defaults, #[allow] placement,
+                      file length, branch caps, TODOs
 
   subprocess gates:
     fmt, clippy (-D warnings), test          (cargo)
     shear, deny                              (--no-external to skip)
     wasm build of every *-core               (the wall proof)
 
-  --fast  static rules only, no subprocesses
+  --fast              static rules only, no subprocesses
+  --update-surfaces   rewrite the surface lock (the 'I meant to publish that' gesture)
 ";
     eprint!("{text}");
     Summary {

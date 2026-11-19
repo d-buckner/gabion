@@ -1,27 +1,34 @@
 //! `#[service]` — one trait, four surfaces.
 //!
-//! Annotates a service trait. Generates (feature-gated in the host api crate):
+//! Annotates a service trait. **The trait is the boundary:** every method in it
+//! is generated into every surface, with no per-method opt-in or opt-out. An op
+//! that must not be remote does not belong in this trait — put it in a plain,
+//! non-`#[service]` trait in the same api crate (reachable in-proc from other
+//! features) or in an inherent `impl` block on the type (reachable nowhere
+//! outside the feature). Adapters only ever hold `Arc<dyn TheService>`, so
+//! anything outside the trait is unreachable from every surface by
+//! construction, not by lint.
+//!
+//! Generates (feature-gated in the host api crate):
 //! - the trait itself, made `async_trait` (dyn-compatible)
-//! - `server` feature: an axum `Router` with one POST per exposed method
+//! - `server` feature: an axum `Router` with one POST per method
 //!   (`POST /<ns>.<method>`), JSON in, `Result` envelope out, error enum ->
-//!   HTTP status via `ServiceError::kind_code`.
+//!   HTTP status via `ErrorKind::http_status`, body is a flat `WireError`.
 //! - `cli` feature: a clap `Command` + async dispatch; input arrives as
 //!   `--json '<input>'` (v1), error enum -> process exit code.
 //!
 //! Method convention (v1): `async fn name(&self, input: T) -> Result<R, ServiceError<E>>`
-//! — exactly one input argument (use `()` for none). `#[internal]` opts a method
-//! out of all generated surfaces.
+//! — exactly one input argument (use `()` for none).
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
 
-/// One generated surface's worth of parsed method info.
+/// One method's worth of parsed info for the surface generators.
 struct Method {
     ident: proc_macro2::Ident,
     snake: proc_macro2::Ident,
     input: Option<Type>, // None = unit input
-    exposed: bool,
 }
 
 /// Everything the code generators need, precomputed from the trait.
@@ -33,19 +40,30 @@ struct Contract {
     methods: Vec<Method>,
 }
 
-impl Contract {
-    fn exposed(&self) -> Vec<&Method> {
-        self.methods.iter().filter(|m| m.exposed).collect()
-    }
-}
-
 #[proc_macro_attribute]
-pub fn service(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if let Err(e) = reject_service_args(&proc_macro2::TokenStream::from(attr)) {
+        return e.to_compile_error().into();
+    }
     let input = parse_macro_input!(item as ItemTrait);
     match expand(input) {
         Ok(t) => t.into(),
         Err(e) => e.to_compile_error().into(),
     }
+}
+
+/// `#[service]` takes no arguments. Silently ignoring `#[service(http)]` would
+/// mean an author who believes they restricted a surface did not restrict it.
+fn reject_service_args(attr: &proc_macro2::TokenStream) -> syn::Result<()> {
+    if attr.is_empty() {
+        return Ok(());
+    }
+    Err(syn::Error::new_spanned(
+        attr,
+        "#[service] takes no arguments: every method in the trait is generated into \
+         every surface. An op that must not be remote belongs in a plain \
+         non-#[service] trait, not in this one.",
+    ))
 }
 
 fn to_snake(s: &str) -> String {
@@ -85,15 +103,16 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
-/// Parse the trait's methods, strip gabion-only attributes from the emitted
-/// trait, and enforce the one-input-argument convention.
+/// Parse the trait's methods and enforce the one-input-argument convention.
+///
+/// The retired per-method surface attributes are a hard error rather than a
+/// silent no-op: an app that still writes them must learn about it at the call
+/// site, not after a route it thought was hidden turns out to be public.
 fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
     let mut methods = Vec::new();
     for item in cleaned.items.iter_mut() {
         let TraitItem::Fn(m) = item else { continue };
-        let exposed = !has_attr(m, "internal");
-        m.attrs
-            .retain(|a| !(a.path().is_ident("internal") || a.path().is_ident("surface")));
+        reject_retired_surface_attrs(m)?;
 
         let mut input_ty: Option<Type> = None;
         for arg in m.sig.inputs.iter() {
@@ -114,23 +133,33 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             ident: m.sig.ident.clone(),
             snake: format_ident!("{}", to_snake(&m.sig.ident.to_string())),
             input: input_ty,
-            exposed,
         });
     }
     Ok(methods)
 }
 
-fn has_attr(m: &syn::TraitItemFn, name: &str) -> bool {
-    m.attrs.iter().any(|a| a.path().is_ident(name))
+fn reject_retired_surface_attrs(m: &syn::TraitItemFn) -> syn::Result<()> {
+    for attr in &m.attrs {
+        let path = attr.path();
+        if path.is_ident("surface") || path.is_ident("internal") {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "per-method surface attributes are gone: every method in a #[service] \
+                 trait is exposed on every surface. Move this method to a plain \
+                 non-#[service] trait if it must not be remote.",
+            ));
+        }
+    }
+    Ok(())
 }
 
-/// axum router: one POST per exposed method, error enum -> HTTP status.
+/// axum router: one POST per method, error enum -> HTTP status.
 fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
     let ns = &c.ns;
     let trait_ident = &c.trait_ident;
     let server_mod = format_ident!("__{}_server", ns);
     let router_fn = format_ident!("{}_router", ns);
-    let exposed = c.exposed();
+    let exposed = &c.methods;
 
     let handlers = exposed.iter().map(|m| {
         let id = &m.ident;
@@ -140,12 +169,15 @@ fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
                 let input: #ty = match ::gabion::serde_json::from_slice(&body) {
                     Ok(v) => v,
                     Err(err) => {
+                        // Same envelope as a service error, so a client parses
+                        // one shape for every failure.
+                        let wire = ::gabion::error::WireError::new(
+                            ::gabion::error::ErrorKind::InvalidInput,
+                            err.to_string(),
+                        );
                         return (
                             ::axum::http::StatusCode::BAD_REQUEST,
-                            ::axum::Json(::gabion::serde_json::json!({
-                                "kind": "invalid_input",
-                                "message": err.to_string(),
-                            })),
+                            ::axum::Json(wire),
                         )
                             .into_response()
                     }
@@ -162,9 +194,19 @@ fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
                 match svc.#id(input).await {
                     Ok(v) => (::axum::http::StatusCode::OK, ::axum::Json(&v)).into_response(),
                     Err(e) => {
-                        let status = ::axum::http::StatusCode::from_u16(e.kind_code.http_status())
+                        let status = ::axum::http::StatusCode::from_u16(e.kind.http_status())
                             .unwrap_or(::axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-                        (status, ::axum::Json(&e)).into_response()
+                        // A detail that will not serialize must not swallow the
+                        // error: send the kind and message, which is all a
+                        // client is guaranteed to understand anyway.
+                        let wire = ::gabion::error::WireError::from_service(&e)
+                            .unwrap_or_else(|_| {
+                                ::gabion::error::WireError::new(
+                                    ::gabion::error::ErrorKind::Internal,
+                                    "error detail failed to serialize",
+                                )
+                            });
+                        (status, ::axum::Json(wire)).into_response()
                     }
                 }
             }
@@ -193,7 +235,7 @@ fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
 
             #(#handlers)*
 
-            /// One POST per exposed method: `POST /<ns>.<method>`.
+            /// One POST per method: `POST /<ns>.<method>`.
             pub fn #router_fn(
                 svc: ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
             ) -> ::axum::Router {
@@ -213,7 +255,7 @@ fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
     let cli_mod = format_ident!("__{}_cli", ns);
     let cli_command_fn = format_ident!("{}_cli_command", ns);
     let cli_dispatch_fn = format_ident!("{}_cli_dispatch", ns);
-    let exposed = c.exposed();
+    let exposed = &c.methods;
 
     let subcommands = exposed.iter().map(|m| {
         let name = m.snake.to_string();
@@ -247,7 +289,7 @@ fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
             Some((#name, sm)) => #call
                 .map(|v| ::gabion::serde_json::to_string_pretty(&v).unwrap_or_default())
                 .map_err(|e| ::gabion::cli::CliExit {
-                    code: e.kind_code.exit_code(),
+                    code: e.kind.exit_code(),
                     message: e.message.clone(),
                 }),
         }
@@ -282,3 +324,6 @@ fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

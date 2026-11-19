@@ -85,7 +85,8 @@ reimplement a linter.
 | `wasm` | Every `*-core` crate builds for `wasm32-unknown-unknown`. This is the wall proof, run per feature. |
 | `edges` | Every `Cargo.toml` against the edge table: process wall, feature wall, contract purity, no upward leak, no host dependency. |
 | `clippy.toml` | The required bans and thresholds are still present. A deleted wall is a named failure. |
-| `sources` | `#[surface]` completeness, no comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs. |
+| `surfaces` | `.gabion/surfaces.lock` matches the set of reachable operations. Publishing a new one is a reviewable diff. |
+| `sources` | No comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs. |
 
 Two rules are the point of the whole design:
 
@@ -137,8 +138,8 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | `unwrap()` or `expect()` | `unwrap_used`, `expect_used` deny |
 | `unwrap_or_default()` in `*-api` or `*-core` | `core-silent-default`. A serialization failure must not become an empty string. |
 | A comment inside a `*-core` function body | `no-comments-in-service-bodies`. Name the concept and extract it. |
-| A method with no `#[surface(..)]` or `#[internal]` | `surface-completeness` |
-| A typo in `#[surface(..)]` | `surface-unknown` |
+| A method added to a service trait without anyone reviewing it | `surface-snapshot`. The reachable set is locked; a new op is a diff. |
+| A `#[surface(..)]` or `#[internal]` left in a contract | The macro refuses to compile. Per-method surface attributes are gone. |
 | `#[allow]` smuggled into a pure crate | `allow-allowlist`, `effect-home-allow` |
 | A ban or threshold deleted from `clippy.toml` | `clippy-config` |
 | A long file, a deep function, a wide signature | `file-length` 400, `too-many-branches` 10, cognitive complexity 15, 80 lines, 6 arguments |
@@ -151,6 +152,10 @@ The design constraint on the product side: you declare a service once, and every
 surface comes from that declaration. No hand-written handler drifts from the
 contract.
 
+**The trait is the boundary.** Every method in a `#[service]` trait is generated
+into every surface, with no per-method opt-in or opt-out. There is no attribute
+to forget and no argument list for the macro to quietly ignore.
+
 ```rust
 // features/todo/todo-api/src/lib.rs
 use gabion::prelude::*;
@@ -162,16 +167,27 @@ pub type TodoErr = ServiceError<TodoError>;
 
 #[service]
 pub trait TodoService {
-    #[surface(cli, http)]
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
-
-    #[surface(cli, http)]
     async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
-
-    #[internal] // explicit opt-out; every method must choose
-    async fn recompute_stats(&self, _input: ()) -> Result<(), TodoErr>;
 }
+
+// An op that must not be remote is not in this trait. A plain trait here: another
+// feature can call it in-process, no surface can reach it.
+#[async_trait]
+pub trait TodoInternals {
+    async fn recompute_stats(&self) -> Result<(), TodoErr>;
+}
+
+// And purely-local internals skip the api crate entirely: inherent methods on
+// the impl in todo-core. Adapters hold Arc<dyn TodoService>, so they cannot see
+// them. Structure, not lint.
 ```
+
+Because there is no annotation to review, the reviewable artifact is the *set*:
+`gabion check` locks every reachable operation in `.gabion/surfaces.lock`, so
+adding a method fails the build until you run `--update-surfaces` and commit it.
+Under this framework's own premise — agents take the shortest path — publishing a
+new callable op should never be a silent event.
 
 `#[service]` generates, behind cargo features, so each host compiles only what
 it needs:
@@ -185,7 +201,9 @@ it needs:
 
 One error enum maps to an HTTP status, an MCP error code, and a CLI exit code.
 `ErrorKind::NotFound` gives 404, -32001, and exit 3 from one match arm in
-`crates/gabion/src/error.rs`. No adapter hand-maps anything.
+`crates/gabion/src/error.rs`. No adapter hand-maps anything. The kind survives
+the boundary: the wire carries a flat `WireError` that a client can deserialize
+and, if it knows the app's error enum, turn back into the typed error.
 
 The renderer calls the same trait. Natively that is an in-process call. In the
 browser it is an HTTP call. Same signature, same types, same errors.
@@ -267,21 +285,22 @@ binary with a file-backed store and as an HTTP server, `todo-core` compiles clea
 to wasm, and the gate passes on this repo.
 
 **Built:** the three-crate feature shape, the edge-table audit, `#[service]` codegen
-for clap and axum, the capability and error model, the effect ban across time,
-env, process, fs, net, and threads, `gabion check` with a failing fixture per
-rule, and a CI template.
+for clap and axum, the capability model (`Clock`, `Store`, `Random`) with native
+and deterministic test impls, an error model that survives the wire (`WireError`),
+the effect ban across time, env, process, fs, net, and threads, `gabion check`
+with a failing fixture per rule, and CI for GitHub Actions.
 
 **Not built:** the MCP surface, the generated typed client, `gabion new`
 scaffolding, per-call `Ctx` (so caller identity and authorization are not
 representable yet), OpenAPI export, and the conformance suite that drives one
 impl through every adapter.
 
-**Claimed but not enforced yet:** `#[surface(cli)]` does not restrict a method to
-CLI today. The macro ignores the argument list, so every method without
-`#[internal]` reaches every built surface. `unsafe_code = "forbid"` is not set.
-`ErrorKind` cannot cross the wire, so a remote caller cannot recover the error
-kind. The CI workflow is valid but no runner is registered on the instance, so
-the gate is enforced locally and by review, not by the server.
+**Claimed but not enforced yet:** `unsafe_code = "forbid"` is not set anywhere, so
+the spec claims a block that does not exist. The surface lock records method
+names, not input types, so a method that keeps its name and changes its input
+shape drifts silently. And no CI run has ever executed: the GitHub Actions
+workflow is configured and the Forgejo one is valid, but no runner is registered,
+so the gate is enforced locally and by review, not by the server.
 
 [docs/GAPS.md](docs/GAPS.md) is the full inspection log, ordered by how much
 damage each silence does. The house rule there: a gap closes when a failing test

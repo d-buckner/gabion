@@ -13,76 +13,27 @@ Ordered by how much damage the silence does.
 
 ## 1. Fail-open defaults (worst class: it passes and means nothing)
 
-### 1.1 `#[surface(...)]` arguments are parsed and thrown away
+Nothing open. The two that were here — the error kind dropped at the wire, and
+second-resolution ids silently overwriting records — are closed, with tests, and
+recorded in §7.
 
-`crates/gabion-macros/src/lib.rs:43` — `pub fn service(_attr: TokenStream, ...)`.
-The attribute's argument list is discarded. Every method that is not
-`#[internal]` gets generated into *every* surface, whatever it says.
+## 2. Missing capabilities
 
-So `#[surface(cli)]` on a method still produces an HTTP route. The gate
-validates surface *names* (`surface-unknown` accepts `cli, http, mcp, all`)
-against a set the macro does not honor — the checker is stricter than the thing
-it checks, which is exactly the kind of disagreement that makes a gate
-untrustworthy.
+`crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Random`, `Caps`. Not
+defined:
 
-Fix: parse the arg list into the per-surface method lists that
-`collect_methods()` already builds, and gate each `gen_*` call on membership.
-
-### 1.2 No `#[surface]` and no `#[internal]` means *exposed*
-
-`crates/gabion-macros/src/lib.rs:94` — `let exposed = !has_attr(m, "internal")`.
-Forgetting the attribute is the same as opting in on all four surfaces,
-including over HTTP. A new method on an existing trait is remotely callable by
-default.
-
-`gabion check` catches this (`surface-completeness`), but after compilation, in
-a step a developer can skip locally. The compiler could refuse at the call site.
-
-Fix: emit `compile_error!` from `#[service]` when a method carries neither
-attribute. Keep the gate rule as the backstop for crates that skip the gate.
-
-### 1.3 Errors cannot cross the wire
-
-`crates/gabion/src/error.rs:44` — `#[derive(Debug, Serialize)]` with
-`#[serde(skip)] pub kind_code: ErrorKind`. There is no `Deserialize`, no
-`Display`, no `impl std::error::Error`.
-
-Consequence: `ErrorKind` — the thing that maps to HTTP status, MCP error code
-and CLI exit code — is dropped on serialization and can never be recovered at
-the client. A remote caller sees a string and guesses. The spec's "one error
-enum, one mapping, everywhere" is true in-process and false across the network.
-
-Fix (signed off): a flat `WireError` with `ErrorKind` serialized, plus generated
-`From` impls in both directions. In-proc error stays rich.
-
-### 1.4 Two creates in the same second silently overwrite each other
-
-`example/features/todo/todo-core/src/lib.rs:35` — `let id = format!("t{}", now.0)`,
-where `now` is whole seconds. Two `create` calls in one second produce the same
-id, and the second `set()` replaces the first. No error, no trace.
-
-This is the same failure mode as the `unwrap_or_default()` data loss fixed in
-#2: silent overwrite, discovered by a missing record.
-
-Fix needs a capability that does not exist yet — see 2.1. A monotonic counter or
-random suffix sourced from `Caps` is the only pure option; `std::time` is banned
-in core for good reason and `Clock` is deliberately coarse.
-
-## 2. Missing capabilities (these block 1.4 and more)
-
-`crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Caps`. Not defined:
-
-- **`Random` / `IdGen`** — required for any pure id generation (1.4).
-- **`Sleep` / `Timeout`** — no testable way to express waiting.
+- **`Sleep` / `Timeout`** — no testable way to express waiting, so any retry or
+  debounce logic would have to fake it.
 - **`Http`** — a core cannot call another service, so the feature wall's
   "cross-feature calls go through the generated client" has no capability to
-  travel on.
+  travel on. This is also what the wasm thin-client posture (spec §10.3) needs
+  before it can exist.
 
 ## 3. Claims ahead of code
 
 | Claim | Reality |
 |---|---|
-| "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README now says so; the spec's §5 example still shows the v2 shape. |
+| "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so; spec §5 describes the intended shape. |
 | `unsafe_code = "forbid"` workspace-wide (spec §7) | Not set anywhere. No `[workspace.lints.rust]` section exists. One line to fix; deliberately not bundled into this PR. |
 | clippy `wildcard_imports` deny on contract (spec §7) | Not set. |
 | "OpenAPI-ready envelope" (README) | No `schemars`, no OpenAPI export, no contract snapshot. Nothing in the repo emits a schema. |
@@ -124,14 +75,55 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 - Branch-count cap lives in `gabion check` (limit 10), not clippy: clippy's
   `too_many_branches` threshold is hardcoded at 42 and has no config key.
 
-## 7. Gate's own gaps
+## 7. Closed (kept here so nobody reopens them)
 
-- **CI does not actually run.** `.forgejo/workflows/ci.yml` is valid and the
+- **Errors could not cross the wire.** `ServiceError<E>` derived `Serialize`
+  only, with `kind_code` marked `#[serde(skip)]` — so the one field that maps
+  to HTTP status, MCP code and exit code was dropped at every boundary, and a
+  remote caller had a string to guess from. Now: `ErrorKind` serializes by
+  name, `WireError` is flat and bidirectional (`from_service` /
+  `into_service_error`), `ServiceError` has `Display` + `std::error::Error`, and
+  the generated HTTP surface emits `WireError` for *every* failure including a
+  body that will not parse. A client that knows the app's error enum recovers
+  the typed error; one that does not still gets kind and message. Proven by
+  `crates/gabion/src/error.rs` tests and by `POST /todo/complete` on a missing
+  id.
+  Deviation from the signed-off plan: the conversions are generic impls in the
+  runtime rather than code the macro generates per service — same effect, less
+  codegen, and nothing for an app to regenerate when the runtime changes.
+- **Two creates in the same second overwrote each other.** Ids were
+  `format!("t{}", now.0)` at whole-second resolution: the second `set()` replaced
+  the first, no error, discovered by a missing record. Fixed with a `Random`
+  capability (`Caps::random`) and a nonce in the id — `SystemRandom` (getrandom)
+  in the native effect home, deterministic `MockRandom` in tests, so id
+  behaviour is reproducible. Proven by `two_creates_in_the_same_second_do_not_collide`
+  and `ids_are_reproducible_under_test_caps`.
+- **`#[surface(...)]` was parsed and thrown away**, so `#[surface(cli)]` still
+  emitted an HTTP route, while the gate validated surface names the macro did
+  not honor. **Removed, not fixed.** There are no per-method surface
+  attributes: every method in a `#[service]` trait reaches every surface, and
+  an op that must not be remote lives outside the trait (plain trait in `*-api`
+  for cross-feature in-proc, inherent method for feature-local). Proven by
+  `crates/gabion-macros/src/tests.rs`.
+- **A missing attribute meant exposed.** With no attribute to forget there is
+  nothing to default on. `#[service(http)]` and any leftover `#[surface]` /
+  `#[internal]` are now hard compile errors rather than silent no-ops — an
+  author who believes they restricted a surface must be told they did not.
+- The two gate rules that used to police this (`surface-completeness`,
+  `surface-unknown`) were deleted, and replaced by `surface-snapshot`: the
+  reviewable artifact is the *set* of reachable ops
+  (`.gabion/surfaces.lock`), not an annotation on each one. Proven by
+  `surface_drift_is_a_finding` and `updating_the_lock_clears_the_finding`.
+
+## 8. Gate's own gaps
+
+- **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
   commit status appears on PRs, but it sits at *Pending* indefinitely and
-  `fj actions tasks` reports no tasks — no runner is registered on the
-  instance. Until one is, the gate is enforced locally and by whoever reviews a
-  PR, not by the server. This is the difference between a wall and a drawing of
-  a wall, so it is the first thing to fix.
+  `fj actions tasks` reports no tasks — no runner is registered on the instance.
+  `.github/workflows/ci.yml` is configured for the move to GitHub and is the
+  same one command. Until one of the two actually executes, the gate is enforced
+  locally and by whoever reviews a PR. This is the difference between a wall and
+  a drawing of a wall, so it is the first thing to fix.
 - `cargo shear` and `cargo deny` are assumed installed; CI installs them, a fresh
   laptop does not have them. `gabion check` reports the step as failed rather
   than "tool missing", which is misleading.
@@ -139,5 +131,17 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 - Source rules scan `src/` only. `tests/` and `examples/` are unchecked by
   design, which is why the framework's own integration tests carry effect-home
   allows.
-- The wasm step builds every `*-core` crate, so an app with no `*-core` crate
-  yet gets a vacuous pass on the wall proof.
+- The wasm step builds every `*-core` crate, so an app with no `*-core` crate yet
+  gets a vacuous pass on the wall proof.
+- The surface lock is a set of names, not a schema: a method that keeps its name
+  and changes its input type drifts silently. Fixing it means hashing the input
+  DTO into the lock line, which wants `schemars` (§4).
+
+## 9. Cheapest fixes available
+
+- Register a CI runner (§8) — until then the gate is a local promise. GitHub
+  Actions is configured (`.github/workflows/ci.yml`) and just needs a repo to
+  run on.
+- `unsafe_code = "forbid"` in `[workspace.lints.rust]`: one line, and the spec
+  already claims it.
+- A `Random`/`IdGen` capability, which unblocks the id collision in 1.2.
