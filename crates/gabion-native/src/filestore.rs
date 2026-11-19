@@ -21,11 +21,17 @@ impl FileStore {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
-        Ok(Self { path: Arc::new(Mutex::new(path)) })
+        Ok(Self {
+            path: Arc::new(Mutex::new(path)),
+        })
     }
 
     fn load(&self) -> Result<BTreeMap<String, String>, StoreError> {
-        let p = self.path.lock().map_err(|e| StoreError::Io(e.to_string()))?.clone();
+        let p = self
+            .path
+            .lock()
+            .map_err(|e| StoreError::Io(e.to_string()))?
+            .clone();
         match std::fs::read_to_string(&p) {
             Ok(s) => serde_json::from_str(&s).map_err(|e| StoreError::Io(e.to_string())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
@@ -34,7 +40,11 @@ impl FileStore {
     }
 
     fn save(&self, map: &BTreeMap<String, String>) -> Result<(), StoreError> {
-        let p = self.path.lock().map_err(|e| StoreError::Io(e.to_string()))?.clone();
+        let p = self
+            .path
+            .lock()
+            .map_err(|e| StoreError::Io(e.to_string()))?
+            .clone();
         let s = serde_json::to_string_pretty(map).map_err(|e| StoreError::Io(e.to_string()))?;
         std::fs::write(&p, s).map_err(|e| StoreError::Io(e.to_string()))
     }

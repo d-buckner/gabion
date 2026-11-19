@@ -1,0 +1,52 @@
+# cargo-deny policy, generated shape for gabion apps.
+# `gabion check` runs `cargo deny check`; `gabion new` ships this file.
+
+[graph]
+targets = [
+    { triple = "wasm32-unknown-unknown" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+]
+
+[advisories]
+# Real vulnerabilities and notices fail the build. Unmaintained notices are
+# checked for *direct* dependencies only, because the transitive hits today are
+# unreachable-by-design through the UI stack (dioxus-desktop -> image ->
+# exr/rav1e: RUSTSEC-2024-0370 paste, RUSTSEC-2024-0436 proc-macro-error) and
+# an app cannot upgrade them. Tighten to "all" once your own deps drift.
+unmaintained = "workspace"
+
+[licenses]
+# The single-binary promise means everything gets statically linked: keep the
+# allow-list to permissive licenses an app can actually ship.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Two copies of the same crate is a binary-size and trait-identity problem, not
+# a crime — warn, and let the app decide.
+multiple-versions = "warn"
+# Workspace members are path deps with no version requirement, which cargo-deny
+# reads as a wildcard. They are pinned by Cargo.lock, which is what actually
+# matters for a single binary — so path/workspace wildcards are fine, but a
+# wildcard from crates.io (`foo = "*"`) still fails the build.
+allow-workspace = true
+allow-wildcard-paths = true
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

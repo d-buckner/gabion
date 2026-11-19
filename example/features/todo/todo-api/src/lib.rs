@@ -24,6 +24,9 @@ pub struct Todo {
 pub enum TodoError {
     NotFound,
     EmptyTitle,
+    /// A store or serialization failure: the request was fine, the world was
+    /// not. Maps to 500 / -32603 / exit 1 via ErrorKind, never hand-mapped.
+    Internal,
 }
 
 impl TodoError {
@@ -31,6 +34,7 @@ impl TodoError {
         match self {
             TodoError::NotFound => ErrorKind::NotFound,
             TodoError::EmptyTitle => ErrorKind::InvalidInput,
+            TodoError::Internal => ErrorKind::Internal,
         }
     }
 }
@@ -60,6 +64,7 @@ pub fn todo_err(detail: TodoError) -> TodoErr {
     let msg = match &detail {
         TodoError::NotFound => "todo not found".to_string(),
         TodoError::EmptyTitle => "title must not be empty".to_string(),
+        TodoError::Internal => "storage failed".to_string(),
     };
     ServiceError::new(kind, msg, detail)
 }

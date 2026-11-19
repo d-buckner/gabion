@@ -13,6 +13,10 @@ geometry is the crate graph, compile targets, and lint gates — enforcement is
 mechanical, never a standard the author has to remember. The wall holds back
 the slope; the drains (api DTOs, trait objects) still flow.
 
+Today two of the four surfaces are built (CLI, HTTP); MCP and the typed client
+are the next two. The gate that seals the walls is built, tested, and runs in
+CI.
+
 ## The two walls (both proven in this repo)
 
 1. **Process wall** — `*-render` crates import `*-api` only. Importing `*-core`
@@ -45,12 +49,48 @@ clap subcommands (`myapp todo create --json '{...}'`), an OpenAPI-ready envelope
 and (v2: rmcp tools + typed client). One error enum maps to HTTP status, MCP
 error code, and CLI exit code — one mapping, everywhere.
 
+## The gate
+
+```sh
+cargo run -p gabion-cli -- check     # one command, one exit code
+```
+
+Green means the architecture is correct. The gate orchestrates the standard
+tools and adds only the rules that need to know gabion's shape — it does not
+reimplement a linter:
+
+| step | what it enforces |
+|---|---|
+| `fmt` `clippy` `test` | rustfmt; clippy with the effect ban and complexity caps; the test suite |
+| `shear` `deny` | unused dependencies; licenses, advisories, sources |
+| `wasm` | every `*-core` crate builds for `wasm32-unknown-unknown` |
+| `edges` | the dependency edge table — process wall, feature wall, contract purity, no upward leaks |
+| `clippy.toml` | the ban list and thresholds are still present; a deleted wall is a named failure |
+| `sources` | `#[surface]` completeness, no comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs |
+
+The edge table is data, not code — an app tunes it in `Cargo.toml`:
+
+```toml
+[workspace.metadata.gabion.edges]
+render = ["framework", "shared", "api"]   # render may never reach core
+```
+
+Crates that legitimately perform effects (a native host, a `*-native` adapter,
+the CLI itself) are declared in `[workspace.metadata.gabion] effect-homes`, and
+the `#![allow(clippy::disallowed_*)]` that grants them is audited: an `#[allow]`
+outside a declared effect home is itself a finding.
+
+Every rule has a failing fixture in `crates/gabion-cli/tests/`, and
+`dogfood.rs` runs the gate against this repo — a wall that stops biting fails
+here first.
+
 ## Layout
 
 ```
 crates/gabion/          runtime: capability traits, error model, testing caps
 crates/gabion-macros/   #[service]
-crates/gabion-native/   native caps: SystemClock, FileStore (the effect home)
+crates/gabion-native/   native caps: SystemClock, FileStore (a declared effect home)
+crates/gabion-cli/      `gabion check`: the gate
 example/features/todo/  todo-api | todo-core | todo-render  (the colocation unit)
 example/hosts/          host-native (CLI+ui) | host-server (axum) | host-web (wasm)
 ```
@@ -59,16 +99,29 @@ example/hosts/          host-native (CLI+ui) | host-server (axum) | host-web (wa
 
 ```sh
 cargo build
-MYAPP_STORE=/tmp/s.json ./target/debug/myapp todo create --json '{"title":"buy sandspice"}'
-MYAPP_STORE=/tmp/s.json ./target/debug/myapp todo list
-MYAPP_STORE=/tmp/s.json ./target/debug/myapp ui          # render crate, in-process
-./target/debug/myapp-server                              # POST http://localhost:3456/todo/create
-cargo build -p todo-core --target wasm32-unknown-unknown # the wall proof
-cargo clippy --workspace                                 # the effect ban
+export MYAPP_STORE=/tmp/s.json                       # default: ./myapp.store.json
+./target/debug/myapp todo create --json '{"title":"buy sandspice"}'
+./target/debug/myapp todo list
+./target/debug/myapp ui                              # render crate, in-process
+./target/debug/myapp-server                          # POST http://localhost:3456/todo/create
+cargo build -p todo-core --target wasm32-unknown-unknown   # the wall proof
+cargo run -p gabion-cli -- check                          # the whole gate
 ```
 
 ## Status
 
-v0 spike: spec §11 experiments 1–2 done and verified (walls bite; one fn → CLI +
-HTTP). Next: rmcp tools, generated typed client (`InProcess` + `Http` impls),
-`fw check` driver, `fw new` scaffolding. See `docs/framework-spec.md` (+ `.html`).
+v0.1 skeleton, working end to end. The todo example runs as a native binary
+(CLI, file-backed store) and as an HTTP server, and `todo-core` compiles clean
+to `wasm32-unknown-unknown`. `host-web` compiles for wasm but has no bundler
+config yet, so treat it as compile-proof, not a shipped browser app.
+
+**Built:** `#[service]` codegen (clap + axum), the capability and error model,
+`gabion check` with tests proving each rule bites, CI, and the effect ban across
+threads / env / process / fs / net.
+
+**Not built yet:** the MCP surface, the generated typed client, `gabion new`
+scaffolding, per-call `Ctx`, and error round-tripping over the wire
+(`WireError`). See `docs/framework-spec.md` for the signed-off decisions behind
+each.
+
+MIT or Apache-2.0 dual licensed.

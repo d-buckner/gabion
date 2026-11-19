@@ -74,13 +74,12 @@ pub fn TodoApp() -> Element {
                             onchange: {
                                 let svc = svc.clone();
                                 let id = t.id.clone();
-                                let mut todos = todos.clone();
                                 move |_| {
                                     let svc = svc.clone();
                                     let id = id.clone();
                                     spawn(async move {
                                         let _ = svc.0.complete(TodoId(id)).await;
-                                        todos.restart();
+                                        refresh(todos);
                                     });
                                 }
                             },
@@ -99,16 +98,14 @@ pub fn TodoApp() -> Element {
             form {
                 onsubmit: {
                     let svc = svc.clone();
-                    let todos = todos.clone();
                     move |evt| {
                         evt.prevent_default();
                         let text = title.cloned();
                         if !text.trim().is_empty() {
                             let svc = svc.clone();
-                            let mut todos = todos.clone();
                             spawn(async move {
                                 let _ = svc.0.create(CreateTodo { title: text }).await;
-                                todos.restart();
+                                refresh(todos);
                             });
                         }
                         title.set(String::new());
@@ -129,6 +126,13 @@ pub fn TodoApp() -> Element {
 
 // --- CLI string renderer (host-native's `ui` subcommand) -------------------
 
+/// `Resource` is `Copy`, so restart it by value: `.clone()` on a `Copy` type is
+/// what clippy rejects, and `let todos = todos;` is what `redundant_locals`
+/// rejects. Taking it by value is the honest form of "copy it, restart the copy".
+fn refresh(mut todos: Resource<Result<Vec<Todo>, String>>) {
+    todos.restart();
+}
+
 /// A "view": renders the list via the trait object it was given.
 pub async fn render_list(svc: &(dyn TodoService + Send + Sync)) -> Result<String, TodoErr> {
     let todos = svc.list(()).await?;
@@ -145,7 +149,10 @@ pub async fn on_add_clicked(
     svc: &(dyn TodoService + Send + Sync),
     title: &str,
 ) -> Result<Todo, TodoErr> {
-    svc.create(CreateTodo { title: title.to_string() }).await
+    svc.create(CreateTodo {
+        title: title.to_string(),
+    })
+    .await
 }
 
 pub async fn on_checkbox_clicked(

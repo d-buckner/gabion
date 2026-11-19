@@ -69,7 +69,10 @@ pub struct TestCaps {
 impl TestCaps {
     #[must_use]
     pub fn new() -> Self {
-        Self { clock: MockClock(Timestamp(1_700_000_000)), store: InMemoryStore::default() }
+        Self {
+            clock: MockClock(Timestamp(1_700_000_000)),
+            store: InMemoryStore::default(),
+        }
     }
 }
 
