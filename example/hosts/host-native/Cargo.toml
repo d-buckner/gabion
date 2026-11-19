@@ -5,6 +5,7 @@ edition.workspace = true
 # v0.1 ships as a git/path dependency; not published to crates.io yet.
 publish = false
 license.workspace = true
+authors.workspace = true
 description = "Native host: CLI + render, core in-process. Composition only — no business logic here."
 
 [[bin]]

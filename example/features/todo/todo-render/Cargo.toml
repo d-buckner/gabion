@@ -5,6 +5,7 @@ edition.workspace = true
 # v0.1 ships as a git/path dependency; not published to crates.io yet.
 publish = false
 license.workspace = true
+authors.workspace = true
 description = "todo UI. Depends on todo-api ONLY — todo-core is not in [dependencies], so importing core internals is unrepresentable."
 
 [dependencies]

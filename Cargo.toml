@@ -17,6 +17,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+authors = ["Daniel Buckner"]
 
 # gabion's own gate configuration. `gabion check` reads this; `gabion new`
 # generates the same block into every app it scaffolds.

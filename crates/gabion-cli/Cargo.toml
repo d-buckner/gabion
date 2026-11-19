@@ -5,6 +5,7 @@ edition.workspace = true
 # v0.1 ships as a git/path dependency; not published to crates.io yet.
 publish = false
 license.workspace = true
+authors.workspace = true
 description = "gabion check: one command, one exit code. Orchestrates clippy + fmt + cargo-shear + cargo-deny + wasm builds, and adds the three rules no existing linter can express."
 
 [[bin]]
