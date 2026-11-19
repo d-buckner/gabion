@@ -2,9 +2,9 @@
 //! the *other* linters honest.
 //!
 //! Everything expressible as clippy config lives in clippy.toml instead of here.
-//! What is left is genuinely gabion-specific: attributes clippy cannot see
-//! (`#[surface]`), policy about the config files themselves (clippy.toml bans,
-//! `#[allow]` placement), and the Dune comment rule.
+//! What is left is genuinely gabion-specific: policy about the config files
+//! themselves (clippy.toml bans, `#[allow]` placement), and the Dune comment
+//! rule.
 //!
 //! Shared source infrastructure (tokenizer, spans, grant regions) lives in
 //! `crate::source`.
@@ -19,7 +19,7 @@ use crate::source::{regions_of, scan_comments, Comment};
 mod branches;
 mod rules;
 use branches::branch_rule;
-use rules::{allow_audit, comment_rule, host_logic_rule, silent_default_rule, surface_rules};
+use rules::{allow_audit, comment_rule, host_logic_rule, silent_default_rule};
 
 #[must_use]
 pub fn check_crate(krate: &Crate, cfg: &Config) -> Vec<Finding> {
@@ -66,7 +66,6 @@ fn check_file(krate: &Crate, cfg: &Config, path: &Path, content: &str, out: &mut
     };
 
     let regions = regions_of(&file);
-    out.extend(surface_rules(krate, path, &file));
     out.extend(comment_rule(krate, path, &file, &comments, &regions));
     out.extend(silent_default_rule(krate, path, &file));
     out.extend(host_logic_rule(krate, path, &file));

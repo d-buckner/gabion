@@ -1,0 +1,92 @@
+//! Unit tests for the contract parser. These exercise `expand` directly: the
+//! `proc_macro` entry point cannot be called from a test, but everything it
+//! does is delegate here.
+
+use super::*;
+
+fn expand_src(body: &str) -> syn::Result<proc_macro2::TokenStream> {
+    expand(syn::parse_str::<ItemTrait>(body)?)
+}
+
+fn parse_attr(attr: &str) -> proc_macro2::TokenStream {
+    match attr.parse() {
+        Ok(t) => t,
+        Err(e) => panic!("bad test attribute {attr:?}: {e}"),
+    }
+}
+
+fn err_of(body: &str) -> String {
+    match expand_src(body) {
+        Ok(_) => String::new(),
+        Err(e) => e.to_string(),
+    }
+}
+
+const CLEAN: &str = "pub trait TodoService {
+    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
+    async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
+}";
+
+#[test]
+fn every_method_in_the_trait_reaches_every_surface() {
+    let out = match expand_src(CLEAN) {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("clean contract must expand: {e}"),
+    };
+    // One HTTP handler per method, no method left behind.
+    assert!(out.contains("__h_create"), "no HTTP handler for create");
+    assert!(out.contains("__h_list"), "no HTTP handler for list");
+}
+
+#[test]
+fn retired_surface_attribute_is_a_hard_error() {
+    // Silently ignoring this would leave an author believing they hid a
+    // method while it stayed public over HTTP.
+    let msg = err_of(
+        "pub trait S {
+        #[surface(cli)]
+        async fn a(&self, _i: ()) -> Result<(), ()>;
+    }",
+    );
+    assert!(
+        msg.contains("surface attributes are gone"),
+        "expected the retired-attribute error, got: {msg}"
+    );
+}
+
+#[test]
+fn retired_internal_attribute_is_a_hard_error() {
+    let msg = err_of(
+        "pub trait S {
+        #[internal]
+        async fn a(&self, _i: ()) -> Result<(), ()>;
+    }",
+    );
+    assert!(
+        msg.contains("surface attributes are gone"),
+        "expected the retired-attribute error, got: {msg}"
+    );
+}
+
+#[test]
+fn service_takes_no_arguments() {
+    assert!(reject_service_args(&proc_macro2::TokenStream::new()).is_ok());
+    let err = reject_service_args(&parse_attr("http"));
+    assert!(
+        err.is_err(),
+        "#[service(http)] must be rejected, not ignored"
+    );
+}
+
+#[test]
+fn one_input_argument_is_enforced() {
+    let msg = err_of(
+        "pub trait S {
+        async fn a(&self, one: A, two: B) -> Result<(), ()>;
+    }",
+    );
+    assert!(
+        msg.contains("exactly one input argument"),
+        "expected the arity error, got: {msg}"
+    );
+}

@@ -77,15 +77,13 @@ unclassified = []
     )
 }
 
-/// Contract: one fn with no surface attr, one with a bogus surface name.
+/// Contract: two public ops. Both reach every surface — that is the design,
+/// and the surface lock is what makes that visible in review.
 const X_API_SRC: &str = "\
 #[service]
 pub trait XService {
-    #[surface(cli, bogus)]
     async fn a(&self) -> u8;
     async fn b(&self) -> u8;
-    #[internal]
-    async fn c(&self) -> u8;
 }
 ";
 
@@ -152,8 +150,7 @@ impl x_api::XService for Q {
     for rule in [
         "process-wall",
         "unclassified-crate",
-        "surface-completeness",
-        "surface-unknown",
+        "surface-snapshot",
         "effect-home-allow",
         "no-comments-in-service-bodies",
         "core-silent-default",
@@ -209,15 +206,18 @@ fn clean_workspace_passes() {
                 &ws_head(&["x-api", "x-core", "x-render", "host-x"]),
             ),
             ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", "x-api::XService::a\n"),
             ("x-api/Cargo.toml", &member("x-api", &[])),
             (
                 "x-api/src/lib.rs",
                 "\
 #[service]
 pub trait XService {
-    #[surface(cli, http)]
     async fn a(&self) -> u8;
-    #[internal]
+}
+
+// in-proc only: no surface, so nothing to lock
+pub trait XInternals {
     async fn c(&self) -> u8;
 }
 ",
@@ -311,5 +311,74 @@ fn edge_finding_names_the_wall_and_the_fix() {
         wall.fix.contains("*-api"),
         "the fix should point at the correct path: {}",
         wall.fix
+    );
+}
+
+/// Adding a public op is an API change: with no per-method opt-out, it is
+/// instantly callable by every caller, including agents. The lock makes that
+/// show up in a diff instead of in production.
+#[test]
+fn surface_drift_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", "x-api::XService::a\n"),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", X_API_SRC),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    let drift = summary
+        .findings
+        .iter()
+        .find(|f| f.rule == "surface-snapshot")
+        .expect("a new public op must be reported");
+    assert!(
+        drift.detail.contains("+ reachable: x-api::XService::b"),
+        "the finding must name the new op, got: {}",
+        drift.detail
+    );
+    assert!(
+        !drift.detail.contains("XService::a"),
+        "unchanged ops must not be reported: {}",
+        drift.detail
+    );
+}
+
+/// The "yes, I meant to publish that" gesture, and the lock then holds.
+#[test]
+fn updating_the_lock_clears_the_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", X_API_SRC),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    assert!(
+        !check(&opts).ok(),
+        "an unlocked surface must fail before it is accepted"
+    );
+
+    opts.update_surfaces = true;
+    let updated = check(&opts);
+    let rules: Vec<&str> = updated.findings.iter().map(|f| f.rule).collect();
+    assert!(updated.ok(), "updating the lock must not fail: {rules:?}");
+    assert!(tmp.path().join(".gabion/surfaces.lock").is_file());
+
+    opts.update_surfaces = false;
+    assert!(
+        check(&opts).ok(),
+        "the lock just written must satisfy the check"
     );
 }

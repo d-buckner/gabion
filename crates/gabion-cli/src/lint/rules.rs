@@ -5,81 +5,12 @@ use std::path::Path;
 
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{Attribute, File, TraitItem};
+use syn::{Attribute, File};
 
 use crate::config::Class;
 use crate::graph::Crate;
 use crate::report::Finding;
 use crate::source::{has_cfg_test, line_of, nested_paths, span_range, Comment, Regions};
-
-// --- #[surface] completeness ----------------------------------------------
-
-const KNOWN_SURFACES: [&str; 4] = ["cli", "http", "mcp", "all"];
-
-struct SurfaceCollector {
-    findings: Vec<Finding>,
-}
-
-impl SurfaceCollector {
-    fn check_fn(&mut self, f: &syn::TraitItemFn) {
-        let name = f.sig.ident.to_string();
-        if f.attrs.iter().any(|a| a.path().is_ident("internal")) {
-            return;
-        }
-        match f.attrs.iter().find(|a| a.path().is_ident("surface")) {
-            Some(attr) => self.check_surface_names(attr, &name),
-            None => self.findings.push(Finding::new(
-                "surface-completeness",
-                format!("{name} (line {})", line_of(f.sig.ident.span())),
-                format!("`{name}` has neither #[surface(..)] nor #[internal]"),
-                "every service fn must choose: expose it on named surfaces, or opt out with #[internal]. Defaulting to exposed publishes an internal method the moment someone forgets an attribute.",
-            )),
-        }
-    }
-
-    fn check_surface_names(&mut self, attr: &Attribute, name: &str) {
-        for meta in nested_paths(attr) {
-            if !KNOWN_SURFACES.contains(&meta.as_str()) {
-                self.findings.push(Finding::new(
-                    "surface-unknown",
-                    format!("{name} (line {})", line_of(attr.pound_token.span)),
-                    format!("#[surface({meta})] names no known surface"),
-                    "known surfaces: cli, http, mcp, all. A typo here silently means 'not exposed there'.",
-                ));
-            }
-        }
-    }
-}
-
-impl<'ast> Visit<'ast> for SurfaceCollector {
-    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
-        if node.attrs.iter().any(|a| a.path().is_ident("service")) {
-            for item in &node.items {
-                if let TraitItem::Fn(f) = item {
-                    self.check_fn(f);
-                }
-            }
-        }
-        syn::visit::visit_item_trait(self, node);
-    }
-}
-
-pub(crate) fn surface_rules(krate: &Crate, path: &Path, file: &File) -> Vec<Finding> {
-    if krate.class != Class::Api {
-        return Vec::new();
-    }
-    let mut v = SurfaceCollector {
-        findings: Vec::new(),
-    };
-    visit::visit_file(&mut v, file);
-    v.findings
-        .into_iter()
-        .map(|mut f| {
-            f.location = format!("{}, {}", krate.at(path, 1), f.location);
-            f
-        })
-        .collect()
-}
 
 // --- Dune's comment rule: no comments inside *-core fn bodies --------------
 

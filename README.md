@@ -34,15 +34,29 @@ with "use of a disallowed type".
 ## One trait, four surfaces
 
 ```rust
+// The trait IS the boundary. Every method in it is generated into every
+// surface — CLI subcommand, HTTP route, MCP tool, typed-client method — with
+// no per-method opt-in or opt-out.
 #[service]
 pub trait TodoService {
-    #[surface(cli, http)]
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
-
-    #[internal] // explicit opt-out; every fn must choose
-    async fn recompute_stats(&self, _input: ()) -> Result<(), TodoErr>;
+    async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }
+
+// An op that must not be remote is not in this trait. Plain trait in the same
+// api crate: another feature can call it in-proc, no surface can reach it.
+pub trait TodoInternals {
+    async fn recompute_stats(&self) -> Result<(), TodoErr>;
+}
+
+// And purely-local internals skip the api crate entirely — inherent methods on
+// the impl. Adapters only hold `Arc<dyn TodoService>`, so they cannot see them.
 ```
+
+There are no surface attributes because there is nothing to configure: the
+shortest path is the correct path, and the reviewable artifact is the *set* of
+reachable ops, locked in `.gabion/surfaces.lock` so publishing a new one shows
+up as a diff in the PR.
 
 `#[service]` generates (feature-gated): an axum router (`POST /todo/create`),
 clap subcommands (`myapp todo create --json '{...}'`), an OpenAPI-ready envelope,
@@ -66,7 +80,8 @@ reimplement a linter:
 | `wasm` | every `*-core` crate builds for `wasm32-unknown-unknown` |
 | `edges` | the dependency edge table — process wall, feature wall, contract purity, no upward leaks |
 | `clippy.toml` | the ban list and thresholds are still present; a deleted wall is a named failure |
-| `sources` | `#[surface]` completeness, no comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs |
+| `surfaces` | `.gabion/surfaces.lock` matches the set of reachable ops — publishing a new one is a reviewable diff |
+| `sources` | no comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs |
 
 The edge table is data, not code — an app tunes it in `Cargo.toml`:
 
