@@ -20,6 +20,16 @@ axum = { workspace = true, optional = true }
 bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true }
+
+# The generated CLI module only exists with the `cli` feature, so the test that
+# drives it is built only then. `gabion check` runs `cargo test --all-features`,
+# which is what makes that skip impossible in the gate.
+[[test]]
+name = "cli_surface"
+required-features = ["cli"]
+
 # These four are used only inside the code `#[service]` generates (axum handlers,
 # clap args, serde wire types), so cargo-shear cannot see them. This is the
 # tool's documented escape hatch rather than a deleted wall.

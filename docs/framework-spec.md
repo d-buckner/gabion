@@ -196,6 +196,7 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | business logic in host crate | arch-lint: no type/fn definitions in hosts beyond wiring + main |
 | forgetting to expose an op | the trait is the boundary: any method in a `#[service]` trait is on every surface, so there is nothing to forget |
 | publishing an op by accident | `surface-snapshot`: `.gabion/surfaces.lock` must match the reachable method set |
+| a `#[service]` trait declared outside `*-api` | `service-outside-api`: `#[service]` generates surfaces wherever it is written, so the lock scans every crate, and a trait in the wrong crate is named |
 | hand-written HTTP handler bypassing contract | arch-lint: `axum` importable only in generated modules + host main |
 | unwrap/expect/panic in core | `clippy::unwrap_used`, `expect_used`, `implicit_clone` deny |
 | unsafe anywhere outside effects | `unsafe_code = "forbid"` workspace-wide |

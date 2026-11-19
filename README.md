@@ -80,7 +80,7 @@ reimplement a linter.
 
 | Step | What it enforces |
 | --- | --- |
-| `fmt`, `clippy`, `test` | rustfmt. clippy with the effect ban, `unwrap_used` and `expect_used` deny, and complexity caps. The test suite. |
+| `fmt`, `clippy`, `test` | rustfmt. clippy with the effect ban, `unwrap_used` and `expect_used` deny, and complexity caps. The test suite, with every feature on, so a feature-gated test cannot be skipped into a vacuous green. |
 | `shear`, `deny` | Unused dependencies. Licenses, advisories, and sources. |
 | `wasm` | Every `*-core` crate builds for `wasm32-unknown-unknown`. This is the wall proof, run per feature. |
 | `edges` | Every `Cargo.toml` against the edge table: process wall, feature wall, contract purity, no upward leak, no host dependency. |
@@ -139,6 +139,7 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | `unwrap_or_default()` in `*-api` or `*-core` | `core-silent-default`. A serialization failure must not become an empty string. |
 | A comment inside a `*-core` function body | `no-comments-in-service-bodies`. Name the concept and extract it. |
 | A method added to a service trait without anyone reviewing it | `surface-snapshot`. The reachable set is locked; a new op is a diff. |
+| A `#[service]` trait declared outside `*-api` | `service-outside-api`. The macro generates a route and a subcommand wherever the trait sits, so the lock scans every crate. |
 | A `#[surface(..)]` or `#[internal]` left in a contract | The macro refuses to compile. Per-method surface attributes are gone. |
 | `#[allow]` smuggled into a pure crate | `allow-allowlist`, `effect-home-allow` |
 | A ban or threshold deleted from `clippy.toml` | `clippy-config` |

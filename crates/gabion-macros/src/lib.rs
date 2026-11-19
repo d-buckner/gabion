@@ -287,11 +287,11 @@ fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
         };
         quote! {
             Some((#name, sm)) => #call
-                .map(|v| ::gabion::serde_json::to_string_pretty(&v).unwrap_or_default())
                 .map_err(|e| ::gabion::cli::CliExit {
                     code: e.kind.exit_code(),
                     message: e.message.clone(),
-                }),
+                })
+                .and_then(|v| ::gabion::cli::render_json(&v)),
         }
     });
 

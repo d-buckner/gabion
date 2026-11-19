@@ -45,7 +45,7 @@ impl Step {
                     "warnings",
                 ],
             ),
-            step("test", "cargo", &["test", "--workspace"]),
+            step("test", "cargo", &["test", "--workspace", "--all-features"]),
         ]
     }
 
