@@ -83,7 +83,10 @@ are types-only and fast; cargo parallelizes small crates.
 
 Cross-feature calls: todo-core may depend on billing-api and receive billing's
 client (in-proc or HTTP) — never billing's internals. This is Dune's "features
-talk through their public surface" rule, made physical.
+talk through their public surface" rule, made physical, and
+`example/features/incidents` is the working case: `incidents-core` depends on
+`checks-api` and nothing from `checks-core`, and it reads probe history through
+the same `CheckService` trait an HTTP client walks through.
 
 ### Registration without wiring (shortest path = correct path)
 

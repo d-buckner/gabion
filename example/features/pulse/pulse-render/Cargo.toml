@@ -1,0 +1,19 @@
+[package]
+name = "pulse-render"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+authors.workspace = true
+description = "pulse status UI. Depends on the two api crates ONLY — no core is in [dependencies], so importing core internals is unrepresentable."
+
+[dependencies]
+checks-api = { path = "../../checks/checks-api" }
+incidents-api = { path = "../../incidents/incidents-api" }
+# Dioxus core + signals only — NO renderer feature here. The host picks the
+# renderer, so this crate stays dual-target native + wasm.
+dioxus = { workspace = true, default-features = false, features = ["macro", "html", "signals", "hooks"] }
+
+[lints]
+workspace = true

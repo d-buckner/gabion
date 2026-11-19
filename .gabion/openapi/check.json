@@ -1,0 +1,343 @@
+{
+  "components": {
+    "responses": {
+      "Error": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/WireError"
+            }
+          }
+        },
+        "description": "The call failed. `kind` is the machine-readable field."
+      }
+    },
+    "schemas": {
+      "Check": {
+        "description": "One URL under watch.",
+        "properties": {
+          "created_at": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "interval_secs": {
+            "description": "How long a watch must sit before it is due again.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "description": "How long one attempt may take before it counts as no answer.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "interval_secs",
+          "timeout_ms",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CheckId": {
+        "type": "string"
+      },
+      "CheckReport": {
+        "description": "A watch with its most recent observation, which is what a status page shows.",
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/Check"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Probe"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "check"
+        ],
+        "type": "object"
+      },
+      "ErrorKind": {
+        "description": "Error kinds map 1:1 onto transport-level outcomes. Serialized by name, so\nthe kind survives a round trip instead of being dropped at the boundary.",
+        "enum": [
+          "not_found",
+          "invalid_input",
+          "conflict",
+          "internal"
+        ],
+        "type": "string"
+      },
+      "NewCheck": {
+        "description": "What to watch. The cadence is the service's policy, not the caller's, so a\ncaller cannot schedule a probe every millisecond.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "Probe": {
+        "description": "One observation. A probe that got a `500` is still a successful probe: it\nobserved an outage. Only a request that never became a response is a miss.",
+        "properties": {
+          "at": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "attempts": {
+            "description": "How many attempts the result took. More than one means the first tries\nfailed and a backoff sat between them.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "description": "What went wrong, empty when nothing did.",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "description": "`0` when no response arrived at all.",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "check_id",
+          "at",
+          "ok",
+          "status",
+          "latency_ms",
+          "attempts",
+          "note"
+        ],
+        "type": "object"
+      },
+      "WireError": {
+        "description": "The flat, bidirectional wire form of a failed call. `detail` is structural\nJSON rather than the app's error type, so an older or newer client still\ngets `kind` and `message`.",
+        "properties": {
+          "detail": {
+            "default": null
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ErrorKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "CheckService",
+    "version": "0.1.0",
+    "x-generator": "gabion 0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/check/add": {
+      "post": {
+        "operationId": "check_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Check"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Start watching a URL. Fails with `InvalidUrl` unless it is http or https.",
+        "tags": [
+          "check"
+        ]
+      }
+    },
+    "/check/history": {
+      "post": {
+        "operationId": "check_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Probe"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Observations for one watch, oldest first.",
+        "tags": [
+          "check"
+        ]
+      }
+    },
+    "/check/list": {
+      "post": {
+        "operationId": "check_list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CheckReport"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every watch with its most recent observation.",
+        "tags": [
+          "check"
+        ]
+      }
+    },
+    "/check/probe": {
+      "post": {
+        "operationId": "check_probe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Probe one watch now, ignoring the schedule.",
+        "tags": [
+          "check"
+        ]
+      }
+    },
+    "/check/sweep": {
+      "post": {
+        "operationId": "check_sweep",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Probe"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Probe every watch whose interval has elapsed, and return what was probed.",
+        "tags": [
+          "check"
+        ]
+      }
+    }
+  }
+}

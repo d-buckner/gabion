@@ -1,0 +1,221 @@
+{
+  "components": {
+    "responses": {
+      "Error": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/WireError"
+            }
+          }
+        },
+        "description": "The call failed. `kind` is the machine-readable field."
+      }
+    },
+    "schemas": {
+      "CheckId": {
+        "type": "string"
+      },
+      "ErrorKind": {
+        "description": "Error kinds map 1:1 onto transport-level outcomes. Serialized by name, so\nthe kind survives a round trip instead of being dropped at the boundary.",
+        "enum": [
+          "not_found",
+          "invalid_input",
+          "conflict",
+          "internal"
+        ],
+        "type": "string"
+      },
+      "Incident": {
+        "description": "One outage of one watch.",
+        "properties": {
+          "cause": {
+            "description": "What the probes said, kept from the probe that opened this.",
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "check_name": {
+            "description": "Copied at open time: a watch may be renamed or removed while its outage\nis still on the record.",
+            "type": "string"
+          },
+          "closed_at": {
+            "description": "`None` while the outage is running.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "check_id",
+          "check_name",
+          "opened_at",
+          "cause"
+        ],
+        "type": "object"
+      },
+      "Uptime": {
+        "description": "How much of a watch's recent history came back.",
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "ok": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pct": {
+            "description": "Whole percent, rounded down. `100` only when every probe in the window\ncame back, so a watch with no history is `0`, not `100`.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "probes": {
+            "description": "Probes counted, which is the whole history up to the window cap.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "check_id",
+          "probes",
+          "ok",
+          "pct"
+        ],
+        "type": "object"
+      },
+      "WireError": {
+        "description": "The flat, bidirectional wire form of a failed call. `detail` is structural\nJSON rather than the app's error type, so an older or newer client still\ngets `kind` and `message`.",
+        "properties": {
+          "detail": {
+            "default": null
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ErrorKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "IncidentService",
+    "version": "0.1.0",
+    "x-generator": "gabion 0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/incident/evaluate": {
+      "post": {
+        "description": "the incidents this call changed.",
+        "operationId": "incident_evaluate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Incident"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Read what the watches saw and open or close incidents to match. Returns",
+        "tags": [
+          "incident"
+        ]
+      }
+    },
+    "/incident/list": {
+      "post": {
+        "operationId": "incident_list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Incident"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every incident, open ones first, newest first within each group.",
+        "tags": [
+          "incident"
+        ]
+      }
+    },
+    "/incident/uptime": {
+      "post": {
+        "operationId": "incident_uptime",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Uptime"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Share of one watch's recent probes that came back.",
+        "tags": [
+          "incident"
+        ]
+      }
+    }
+  }
+}
