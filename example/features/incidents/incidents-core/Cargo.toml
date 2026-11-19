@@ -1,0 +1,20 @@
+[package]
+name = "incidents-core"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+authors.workspace = true
+description = "incidents business logic. Reads checks through the checks contract only — compiles to wasm32."
+
+[dependencies]
+gabion = { workspace = true }
+incidents-api = { path = "../incidents-api" }
+checks-api = { path = "../../checks/checks-api" }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

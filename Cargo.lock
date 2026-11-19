@@ -497,6 +497,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "checks-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "clap",
+ "gabion",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "checks-core"
+version = "0.1.0"
+dependencies = [
+ "checks-api",
+ "gabion",
+ "tokio",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2331,6 +2353,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "host-pulse-cli"
+version = "0.1.0"
+dependencies = [
+ "checks-api",
+ "checks-core",
+ "clap",
+ "gabion",
+ "gabion-native",
+ "incidents-api",
+ "incidents-core",
+ "tokio",
+]
+
+[[package]]
+name = "host-pulse-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "checks-api",
+ "checks-core",
+ "gabion",
+ "gabion-native",
+ "incidents-api",
+ "incidents-core",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "host-pulse-web"
+version = "0.1.0"
+dependencies = [
+ "checks-api",
+ "checks-core",
+ "dioxus",
+ "gabion",
+ "incidents-api",
+ "incidents-core",
+ "pulse-render",
+ "tokio",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "host-server"
 version = "0.1.0"
 dependencies = [
@@ -2621,6 +2687,30 @@ name = "imgref"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
+
+[[package]]
+name = "incidents-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "checks-api",
+ "clap",
+ "gabion",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "incidents-core"
+version = "0.1.0"
+dependencies = [
+ "checks-api",
+ "gabion",
+ "incidents-api",
+ "tokio",
+]
 
 [[package]]
 name = "indexmap"
@@ -3966,6 +4056,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 
 [[package]]
+name = "pulse-render"
+version = "0.1.0"
+dependencies = [
+ "checks-api",
+ "dioxus",
+ "incidents-api",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5245,6 +5344,7 @@ dependencies = [
  "bytes",
  "clap",
  "gabion",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",

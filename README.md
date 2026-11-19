@@ -220,6 +220,41 @@ and, if it knows the app's error enum, turn back into the typed error.
 The renderer calls the same trait. Natively that is an in-process call. In the
 browser it is an HTTP call. Same signature, same types, same errors.
 
+## Two examples
+
+`example/features/todo/` is the minimal shape: one feature, three crates, every
+surface. Everything the docs quote is from it.
+
+`example/features/pulse/` is the same walls under load — a service monitor with
+two features that talk to each other:
+
+```
+example/features/checks/      checks-api | checks-core    watch URLs, probe them
+example/features/incidents/   incidents-api | incidents-core   open and close outages
+example/features/pulse/       pulse-render                the status board
+example/hosts/host-pulse-{cli,server,web}/               three surfaces, one core
+```
+
+What it proves that the todo example cannot:
+
+- **A feature calls a feature through its contract.** `incidents-core` computes
+  uptime and outages from probe history, and its only window on the probes is
+  `checks-api`. `checks-core` is not a dependency, so the wall is not a
+  convention: the same call the UI makes over HTTP is the call the feature makes
+  in-process.
+- **The wait capabilities do real work.** A probe is three tries with a doubling
+  wait and a deadline. Under `TestCaps` the ladder runs at full speed on a
+  virtual clock and a test asserts the backoff was 250ms then 500ms; under
+  `NativeCaps` the same code calls a real socket. One test file probes a live
+  axum route, a route that returns 503, and a port nobody listens on.
+- **Three surfaces, one core.** `pulse` (CLI), `pulse-server` (axum, both
+  routers, plus `/openapi.json`), and the wasm status board all drive the same
+  two impls.
+- **Every wall is a passing rule, not a claim.** Adding these two features made
+  `gabion check` fail on `surface-snapshot` until the new ops were reviewed and
+  committed, and the feature wall, the effect ban, and the contract-purity rules
+  all pass with the cross-feature edge in the graph.
+
 ## Quick start
 
 Rust comes from rustup. `rust-toolchain.toml` pins stable and adds the wasm
@@ -251,6 +286,16 @@ export MYAPP_STORE=/tmp/s.json       # default: ./myapp.store.json
 ./target/debug/myapp gui             # a Dioxus desktop window
 ```
 
+The monitor example runs on the same three surfaces:
+
+```sh
+cargo run -p host-pulse-cli -- check add --json '{"name":"api","url":"https://example.com"}'
+cargo run -p host-pulse-cli -- check sweep     # probe what is due, with retries
+cargo run -p host-pulse-cli -- incident evaluate
+cargo run -p host-pulse-server                 # both routers on :3457, plus /openapi.json
+cargo build -p checks-core --target wasm32-unknown-unknown   # the same core, for the browser
+```
+
 The full gate also runs `cargo shear` and `cargo deny`. Install them with
 `cargo install cargo-shear cargo-deny`, or pass `--no-external` to skip them.
 
@@ -262,7 +307,11 @@ crates/gabion-macros/   #[service]
 crates/gabion-native/   native caps: SystemClock, FileStore (a declared effect home)
 crates/gabion-cli/      gabion check: the gate
 example/features/todo/  todo-api | todo-core | todo-render  (the colocation unit)
+example/features/checks/     checks-api | checks-core     (pulse: watch URLs)
+example/features/incidents/  incidents-api | incidents-core (pulse: outages, reads checks)
+example/features/pulse/      pulse-render                 (pulse: the status board)
 example/hosts/          host-native (CLI + UI) | host-server (axum) | host-web (wasm)
+                        host-pulse-cli | host-pulse-server | host-pulse-web
 docs/                   the spec, the inspection log, the collab proposal
 ```
 
@@ -294,9 +343,10 @@ would raise a limit is ignored, and the raised `clippy.toml` is then a
 
 ## Status
 
-v0.1. The example runs end to end today: the todo feature works as a native
+v0.1. The examples run end to end today: the todo feature works as a native
 binary with a file-backed store and as an HTTP server, `todo-core` compiles clean
-to wasm, and the gate passes on this repo.
+to wasm, and the gate passes on this repo. The pulse monitor runs two features
+that call each other through a contract, over CLI, HTTP, and a wasm board.
 
 **Built:** the three-crate feature shape, the edge-table audit, `#[service]` codegen
 for clap and axum, the capability model (`Clock`, `Store`, `Random`, `Sleep`,
@@ -304,7 +354,8 @@ for clap and axum, the capability model (`Clock`, `Store`, `Random`, `Sleep`,
 error model that survives the wire (`WireError`), the effect ban across time, env,
 process, fs, net, and threads, the Cargo.toml wall itself (`unsafe_code = "forbid"`
 with every member opted in), an OpenAPI 3.1 document generated from the same trait
-as the router and committed as a reviewable contract, `gabion check` with a failing
+as the router and committed as a reviewable contract, a second feature reading the
+first through its published contract, `gabion check` with a failing
 fixture per rule, and CI on GitHub Actions.
 
 **Not built:** the MCP surface, the generated typed client, `gabion new`

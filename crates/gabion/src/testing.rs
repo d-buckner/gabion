@@ -352,6 +352,20 @@ impl TestCaps {
     pub fn time(&self) -> &MockTime {
         self.clock.time()
     }
+
+    /// Swap in a scripted `http`, so a core that calls out is testable without a
+    /// socket: `TestCaps::new().with_http(MockHttp::new().route(..))`.
+    #[must_use]
+    pub fn with_http(mut self, http: MockHttp) -> Self {
+        self.http = http;
+        self
+    }
+
+    /// The http capability, so a test can read back what the core asked to send.
+    #[must_use]
+    pub fn http(&self) -> &MockHttp {
+        &self.http
+    }
 }
 
 impl Default for TestCaps {

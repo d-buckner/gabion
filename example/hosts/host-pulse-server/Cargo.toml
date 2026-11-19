@@ -1,0 +1,29 @@
+[package]
+name = "host-pulse-server"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+authors.workspace = true
+description = "pulse server host: two generated routers on one axum app. Composition only."
+
+[[bin]]
+name = "pulse-server"
+path = "src/main.rs"
+
+[dependencies]
+gabion-native = { workspace = true }
+checks-api = { path = "../../features/checks/checks-api", features = ["server", "openapi"] }
+incidents-api = { path = "../../features/incidents/incidents-api", features = ["server", "openapi"] }
+checks-core = { path = "../../features/checks/checks-core" }
+incidents-core = { path = "../../features/incidents/incidents-core" }
+axum = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+gabion = { workspace = true }
+
+[lints]
+workspace = true

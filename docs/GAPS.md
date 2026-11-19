@@ -62,11 +62,13 @@ workspace-wide, the glob re-export wall, and the OpenAPI envelope.
 
 ## 5. Compile-proof, not shipped
 
-`example/hosts/host-web` builds for `wasm32-unknown-unknown` and is wired with
-`MockClock` + `InMemoryStore`. There is no bundler config (`Dioxus.toml`), no
-`wasm-bindgen` driver, and no way to run it in a browser. It proves the render
-crate is wasm-clean; it is not a browser app. The signed-off posture for the
-browser is a thin client over HTTP (spec §10), which is also not built.
+`example/hosts/host-web` and `example/hosts/host-pulse-web` build for
+`wasm32-unknown-unknown` and are wired with a fixed clock and an in-memory store
+(`TestCaps`, which is what the unit tests run on). There is no bundler config
+(`Dioxus.toml`), no `wasm-bindgen` driver, and no way to run either in a browser.
+They prove the render crates are wasm-clean; they are not browser apps. The
+signed-off posture for the browser is a thin client over HTTP (spec §10), which is
+also not built.
 
 ## 6. Deliberate allowances (not gaps, but they look like gaps)
 
@@ -233,6 +235,26 @@ browser is a thin client over HTTP (spec §10), which is also not built.
   type; and the document is opt-in per api crate, because requiring `JsonSchema` on
   every DTO is a demand an app may not want to take on.
 
+- **No example had two features.** Everything above claimed a feature wall and a
+  cross-feature call, and the repo had one feature, so nothing exercised either.
+  `example/features/pulse` is a second app: `checks` probes URLs, `incidents`
+  opens and closes outages from probe history, and `incidents-core`'s only window
+  on those probes is `checks-api`. `checks-core` is not a dependency of
+  `incidents-core` at all — `gabion check` reads dev-dependencies too, so a test
+  could not smuggle the implementation in — and the incidents tests drive a stub
+  that implements the contract and nothing else.
+  `example/hosts/host-pulse-server/tests/live_probe.rs` runs the same core
+  against a live socket, a route that returns 503, and a port nobody listens on.
+  Adding the two services made `surface-snapshot` fail until the eight new ops
+  were reviewed and committed to `.gabion/surfaces.lock`.
+  This is also the first code in the repo that waits: the probe ladder is three
+  tries with a doubling wait and a deadline, and
+  `checks-core/tests/probing.rs` asserts the backoff was 250ms then 500ms on the
+  virtual clock, so the wait is proven rather than assumed.
+  Two papercuts it exposed and fixed: `TestCaps` had no way to carry a scripted
+  `MockHttp` (now `with_http` and `http()`), and `CliExit` had no `Debug`, so a
+  test could not unwrap a generated CLI dispatch.
+
 ## 8. Gate's own gaps
 
 - **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
@@ -257,6 +279,7 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 
 ## 9. Cheapest fixes available
 
-- A `Random`/`IdGen` capability, which unblocks the id collision in 1.2.
 - The visibility check spec §7 claims (`pub` past the wall), which is the last
   wall in that table with nothing behind it.
+- A `Dioxus.toml` and a `wasm-bindgen` driver for one wasm host, which would turn
+  §5 from a compile proof into a running page.

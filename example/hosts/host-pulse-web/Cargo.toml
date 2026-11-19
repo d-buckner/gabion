@@ -1,0 +1,28 @@
+[package]
+name = "host-pulse-web"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+authors.workspace = true
+description = "pulse web host (cdylib): proves both features plus the renderer compile to wasm32-unknown-unknown."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gabion = { workspace = true }
+checks-api = { path = "../../features/checks/checks-api" }
+incidents-api = { path = "../../features/incidents/incidents-api" }
+checks-core = { path = "../../features/checks/checks-core" }
+incidents-core = { path = "../../features/incidents/incidents-core" }
+pulse-render = { path = "../../features/pulse/pulse-render" }
+dioxus = { workspace = true, features = ["web", "launch"] }
+wasm-bindgen = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

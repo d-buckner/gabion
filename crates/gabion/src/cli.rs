@@ -5,6 +5,7 @@ use crate::error::ErrorKind;
 use serde::Serialize;
 
 /// A failed CLI invocation: exit code derived from `ErrorKind::exit_code`.
+#[derive(Debug)]
 pub struct CliExit {
     pub code: i32,
     pub message: String,
