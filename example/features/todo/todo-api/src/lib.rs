@@ -41,21 +41,27 @@ impl TodoError {
 
 pub type TodoErr = ServiceError<TodoError>;
 
+/// The public contract. **Every method in this trait is generated into every
+/// surface** — CLI subcommand, HTTP route, MCP tool, typed-client method — with
+/// no per-method opt-in or opt-out. That makes the trait itself the security
+/// boundary: adding a method here grants it to every caller, including agents.
+/// An op that must not be remote does not belong in this trait.
 #[service]
 pub trait TodoService {
-    #[surface(cli, http)]
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
 
-    #[surface(cli, http)]
     async fn complete(&self, input: TodoId) -> Result<Todo, TodoErr>;
 
-    #[surface(cli, http)]
     async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
+}
 
-    /// Explicit opt-out: internal ops get no surface, and the
-    /// surface-completeness rule is satisfied by the attribute's presence.
-    #[internal]
-    async fn recompute_stats(&self, _input: ()) -> Result<(), TodoErr>;
+/// The middle rung of the ladder: reachable in-proc from another feature
+/// through `todo-api`, but no surface is generated for it, so no CLI flag, HTTP
+/// route, or agent tool can reach it. Purely-local internals skip this rung and
+/// live as inherent methods on the impl in `todo-core` instead.
+#[async_trait]
+pub trait TodoInternals {
+    async fn recompute_stats(&self) -> Result<(), TodoErr>;
 }
 
 /// Constructor helper: builds the wire envelope from a domain error.

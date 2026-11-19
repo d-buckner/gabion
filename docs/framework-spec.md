@@ -110,17 +110,26 @@ pub struct CreateTodo { pub title: String }
 pub enum TodoError { #[code(404)] NotFound }
 
 #[service]                   // generates client, router, clap, mcp, openapi
-pub trait TodoService {
-    #[surface(cli, http, mcp)]
+pub trait TodoService {                 // the trait IS the boundary:
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoError>;
-
-    #[surface(cli, http)]
     async fn list(&self, q: ListQuery) -> Result<Vec<Todo>, TodoError>;
+}
 
-    #[internal]              // explicit opt-out; required or surface-completeness lint fails
+// DECIDED: no per-method surface attributes. Every method in a #[service] trait
+// is generated into every surface. An op that must not be remote lives outside
+// the trait — a plain trait here for cross-feature in-proc calls:
+pub trait TodoInternals {
     async fn recompute_stats(&self) -> ();
 }
+// ...or an inherent method on the impl in todo-core, reachable by nothing
+// outside the feature. Adapters hold Arc<dyn TodoService>, so neither is
+// reachable from any surface. Structure, not lint.
 ```
+
+Because there is no attribute to review, the reviewable artifact is the *set* of
+reachable operations: `gabion check` locks it in `.gabion/surfaces.lock` and
+fails when it drifts, so "this method is now callable by an agent" appears as a
+diff in the PR rather than in production.
 
 `#[service]` generates, feature-gated so each host compiles only what it needs:
 
@@ -179,7 +188,8 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | effect without capability | same as above |
 | DTO defined in core | render compile error at the wall |
 | business logic in host crate | arch-lint: no type/fn definitions in hosts beyond wiring + main |
-| forgetting to expose an op | surface-completeness lint: every trait fn has `#[surface]` or `#[internal]` |
+| forgetting to expose an op | the trait is the boundary: any method in a `#[service]` trait is on every surface, so there is nothing to forget |
+| publishing an op by accident | `surface-snapshot`: `.gabion/surfaces.lock` must match the reachable method set |
 | hand-written HTTP handler bypassing contract | arch-lint: `axum` importable only in generated modules + host main |
 | unwrap/expect/panic in core | `clippy::unwrap_used`, `expect_used`, `implicit_clone` deny |
 | unsafe anywhere outside effects | `unsafe_code = "forbid"` workspace-wide |
@@ -254,6 +264,13 @@ Signed off in the v0.1 audit:
    IndexedDB/WebCaps is a later option, not the default.
 4. **Dune's comment ban is adopted, scoped to `*-core` fn bodies.** Doc comments
    on public items stay required — codegen and OpenAPI read them.
+5. **The trait is the boundary; there are no per-method surface attributes.**
+   Every method in a `#[service]` trait is generated into every surface. Ops
+   that must not be remote live outside the trait: a plain trait in `*-api` for
+   cross-feature in-proc calls, inherent methods on the impl for
+   feature-local internals. There is no opt-out for one surface — if it must not
+   be remote, it is not in the trait. The reviewable artifact is the locked set
+   of reachable ops (`.gabion/surfaces.lock`), not an annotation per method.
 
 Still open (see `docs/GAPS.md` for the full log, ordered by how much damage the
 silence does):

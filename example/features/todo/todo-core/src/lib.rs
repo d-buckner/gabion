@@ -5,7 +5,9 @@
 //! Add `std::time::SystemTime::now()` anywhere here and it fails to compile.
 
 use gabion::prelude::*;
-use todo_api::{todo_err, CreateTodo, Todo, TodoErr, TodoError, TodoId, TodoService};
+use todo_api::{
+    todo_err, CreateTodo, Todo, TodoErr, TodoError, TodoId, TodoInternals, TodoService,
+};
 
 pub struct TodoServiceImpl<C: Caps> {
     caps: C,
@@ -80,8 +82,13 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
             .map(|(_, v)| gabion::serde_json::from_str::<Todo>(v).map_err(|_| internal()))
             .collect()
     }
+}
 
-    async fn recompute_stats(&self, _input: ()) -> Result<(), TodoErr> {
+/// In-proc only: `todo-api` exposes this trait so another feature can call it,
+/// but `#[service]` never sees it, so it reaches no surface.
+#[async_trait]
+impl<C: Caps> TodoInternals for TodoServiceImpl<C> {
+    async fn recompute_stats(&self) -> Result<(), TodoErr> {
         Ok(())
     }
 }
