@@ -83,6 +83,18 @@ pub fn check(opts: &Options) -> Summary {
         }
     };
 
+    if graph.crates.is_empty() {
+        return Summary {
+            findings: Vec::new(),
+            steps,
+            failed_steps: vec![
+                "graph: `cargo metadata` reported no workspace members, so every rule below had \
+                 nothing to check"
+                    .to_string(),
+            ],
+        };
+    }
+
     let mut findings = edges::check(&graph, &cfg);
     findings.extend(clippy_cfg::check(&opts.root, &cfg));
     findings.extend(surfaces::check(&graph, &opts.root, opts.update_surfaces));

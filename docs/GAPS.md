@@ -13,9 +13,20 @@ Ordered by how much damage the silence does.
 
 ## 1. Fail-open defaults (worst class: it passes and means nothing)
 
-Nothing open. The two that were here — the error kind dropped at the wire, and
-second-resolution ids silently overwriting records — are closed, with tests, and
-recorded in §7.
+Nothing open. Six items were here in total. The first two — the error kind
+dropped at the wire, and second-resolution ids silently overwriting records —
+closed earlier. A re-audit of the gate itself found four more, and each was
+confirmed by running the checker against a fixture before it was fixed:
+
+- the surface lock missed an op published as `#[gabion::service]`, because the
+  collector matched the bare spelling of the attribute only;
+- the surface lock missed every op in a `#[service]` trait declared outside
+  `*-api`, while the macro still generated a route and a subcommand for it;
+- the generated CLI printed nothing and exited 0 when a result would not
+  serialize;
+- a workspace with no members passed every rule without inspecting a crate.
+
+All four are closed with fixtures, and recorded in §7.
 
 ## 2. Missing capabilities
 
@@ -109,6 +120,32 @@ browser is a thin client over HTTP (spec §10), which is also not built.
   nothing to default on. `#[service(http)]` and any leftover `#[surface]` /
   `#[internal]` are now hard compile errors rather than silent no-ops — an
   author who believes they restricted a surface must be told they did not.
+- **The surface lock could be evaded by spelling.** The collector matched an
+  attribute path equal to `service`, so `#[gabion::service]` generated the full
+  set of surfaces while the op stayed out of `.gabion/surfaces.lock`. A locked
+  surface that depends on spelling is not a boundary. The collector now keys on
+  the last path segment. Proven by `surface_lock_sees_a_qualified_service_attribute`.
+- **A `#[service]` trait outside `*-api` was invisible.** The collector scanned
+  `*-api` crates only, but `#[service]` generates a route, a subcommand and a
+  client method wherever it appears. A trait in `*-core` published ops that no
+  review ever saw. The collector now scans every crate, and `service-outside-api`
+  names a trait declared in the wrong crate. Proven by
+  `service_trait_outside_the_contract_crate_is_a_finding`. The lock still records
+  names, not input types; that gap stays open in §8.
+- **The generated CLI called a failed call a success.** The clap dispatch mapped
+  a successful result with `to_string_pretty(..).unwrap_or_default()`, so a value
+  whose `Serialize` impl fails produced empty stdout and exit code 0 — the same
+  output as a call that succeeded with nothing to show. Rendering moved to
+  `gabion::cli::render_json`, which returns a `CliExit` with the `Internal` exit
+  code. Proven by `a_success_value_that_will_not_serialize_fails_the_call`, which
+  drives the generated dispatch, not the template string.
+- **An empty workspace passed.** `gabion check` ran its rules over the crate
+  graph from `cargo metadata`. With no members the graph is empty, every rule has
+  nothing to check, and the run prints PASS. An empty graph is now a named
+  failure. Proven by `a_workspace_with_no_members_is_a_failure`. The same run now
+  uses `cargo test --all-features`, so a feature-gated test target cannot be
+  skipped into a vacuous green.
+
 - The two gate rules that used to police this (`surface-completeness`,
   `surface-unknown`) were deleted, and replaced by `surface-snapshot`: the
   reviewable artifact is the *set* of reachable ops

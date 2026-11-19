@@ -350,6 +350,152 @@ fn surface_drift_is_a_finding() {
     );
 }
 
+/// The lock is the security artifact, so it must not depend on spelling. An app
+/// that writes `#[gabion::service]` gets the same generated surfaces, and every
+/// op in it has to show up in the diff.
+#[test]
+fn surface_lock_sees_a_qualified_service_attribute() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", ""),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            (
+                "x-api/src/lib.rs",
+                "\
+#[gabion::service]
+pub trait XService {
+    async fn a(&self) -> u8;
+}
+",
+            ),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    let drift = summary
+        .findings
+        .iter()
+        .find(|f| f.rule == "surface-snapshot")
+        .expect("an op published through #[gabion::service] must reach the lock");
+    assert!(
+        drift.detail.contains("x-api::XService::a"),
+        "the finding must name the op, got: {}",
+        drift.detail
+    );
+}
+
+/// A `#[service]` trait generates routes and subcommands wherever it is declared.
+/// Outside `*-api` the lock used to miss it entirely, so the op was public and
+/// unreviewed at the same time.
+#[test]
+fn service_trait_outside_the_contract_crate_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            (
+                "Cargo.toml",
+                &ws_head(&["x-api", "x-core", "x-render", "host-x"]),
+            ),
+            ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", ""),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", "pub trait X {}\n"),
+            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            (
+                "x-core/src/lib.rs",
+                "\
+#[service]
+pub trait SneakyService {
+    async fn op(&self) -> u8;
+}
+",
+            ),
+            ("x-render/Cargo.toml", &member("x-render", &["x-api"])),
+            ("x-render/src/lib.rs", "pub fn r() {}\n"),
+            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
+            ("host-x/src/lib.rs", "fn main() {}\n"),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    let placement = summary
+        .findings
+        .iter()
+        .find(|f| f.rule == "service-outside-api")
+        .expect("a #[service] trait in a core crate generates surfaces; it must be named");
+    assert!(
+        placement.detail.contains("SneakyService"),
+        "the finding must name the trait, got: {}",
+        placement.detail
+    );
+    let drift = summary
+        .findings
+        .iter()
+        .find(|f| f.rule == "surface-snapshot")
+        .expect("the op is reachable, so the lock must show it");
+    assert!(
+        drift.detail.contains("x-core::SneakyService::op"),
+        "the lock must name the op, got: {}",
+        drift.detail
+    );
+}
+
+/// A file `syn` cannot parse is invisible to every source rule, including the
+/// surface collector. The lock is only honest if that case is a finding.
+#[test]
+fn an_unparsable_source_file_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", ""),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            (
+                "x-api/src/lib.rs",
+                "this is not rust, and it hides a service\n",
+            ),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    assert!(
+        summary.findings.iter().any(|f| f.rule == "unparsed-source"),
+        "an unparsable contract file must be reported, not skipped"
+    );
+}
+
+/// A workspace with no members makes every rule vacuously green. That is the
+/// worst result the gate can produce: it passes and means nothing.
+#[test]
+fn a_workspace_with_no_members_is_a_failure() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&[])),
+            ("clippy.toml", &honest_clippy_toml()),
+            (".gabion/surfaces.lock", ""),
+        ],
+    );
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    assert!(
+        !summary.ok(),
+        "a gate that inspected no crate must not report PASS"
+    );
+}
+
 /// The "yes, I meant to publish that" gesture, and the lock then holds.
 #[test]
 fn updating_the_lock_clears_the_finding() {

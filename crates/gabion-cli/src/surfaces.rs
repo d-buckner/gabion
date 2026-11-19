@@ -21,16 +21,33 @@ use crate::report::Finding;
 /// Path of the lock file, relative to the workspace root.
 pub const LOCK_PATH: &str = ".gabion/surfaces.lock";
 
-/// One `crate::Trait::method` line per reachable operation.
+/// One `crate::Trait::method` line per reachable operation, plus the names of
+/// the traits that produced them.
+struct Collected {
+    ops: BTreeSet<String>,
+    traits: Vec<String>,
+}
+
 struct Collector {
     krate: String,
     found: BTreeSet<String>,
+    traits: Vec<String>,
+}
+
+/// `#[service]`, `#[gabion::service]` and `#[::gabion_macros::service]` all
+/// generate the same surfaces, so the collector keys on the last path segment.
+/// Keying on the bare spelling let an app publish ops the lock never saw.
+fn is_service(path: &syn::Path) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|seg| seg.ident == "service")
 }
 
 impl<'ast> Visit<'ast> for Collector {
     fn visit_item_trait(&mut self, node: &'ast ItemTrait) {
-        if node.attrs.iter().any(|a| a.path().is_ident("service")) {
+        if node.attrs.iter().any(|a| is_service(a.path())) {
             let trait_name = node.ident.to_string();
+            self.traits.push(trait_name.clone());
             for item in &node.items {
                 if let TraitItem::Fn(f) = item {
                     self.found
@@ -42,10 +59,11 @@ impl<'ast> Visit<'ast> for Collector {
     }
 }
 
-fn collect_crate(krate: &Crate) -> BTreeSet<String> {
+fn collect_crate(krate: &Crate) -> Collected {
     let mut v = Collector {
         krate: krate.name.clone(),
         found: BTreeSet::new(),
+        traits: Vec::new(),
     };
     for path in krate.source_files() {
         if let Ok(content) = std::fs::read_to_string(&path) {
@@ -54,18 +72,28 @@ fn collect_crate(krate: &Crate) -> BTreeSet<String> {
             }
         }
     }
-    v.found
+    Collected {
+        ops: v.found,
+        traits: v.traits,
+    }
 }
 
-/// Every operation reachable from any surface, across every `*-api` crate.
-#[must_use]
-pub fn collect(graph: &Graph) -> BTreeSet<String> {
-    graph
-        .crates
-        .iter()
-        .filter(|k| k.class == Class::Api)
-        .flat_map(collect_crate)
-        .collect()
+/// A `#[service]` trait outside `*-api` is a finding: the trait is the boundary,
+/// so it must sit in the crate the wall keeps free of implementation.
+fn placement_findings(krate: &Crate, collected: &Collected) -> Vec<Finding> {
+    if krate.class == Class::Api || collected.traits.is_empty() {
+        return Vec::new();
+    }
+    vec![Finding::new(
+        "service-outside-api",
+        krate.name.clone(),
+        format!(
+            "#[service] trait(s) {} declared in a {} crate",
+            collected.traits.join(", "),
+            krate.class.key()
+        ),
+        "#[service] generates a route, a subcommand and a client method for every method in the trait, wherever it is written. Declare the trait in the feature's *-api crate.",
+    )]
 }
 
 fn lock_file(root: &Path) -> PathBuf {
@@ -98,10 +126,20 @@ fn write_lock(root: &Path, current: &BTreeSet<String>) -> Result<(), String> {
 
 /// Compare the live surface against the lock. `update` rewrites the lock instead
 /// of reporting, which is the "yes, I meant to publish that" gesture.
+///
+/// Every crate is scanned, not just `*-api`: `#[service]` generates a route and
+/// a subcommand wherever it appears, so a trait declared anywhere else is still
+/// reachable and still belongs in the lock.
 pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
-    let current = collect(graph);
+    let mut findings = Vec::new();
+    let mut current = BTreeSet::new();
+    for krate in &graph.crates {
+        let collected = collect_crate(krate);
+        findings.extend(placement_findings(krate, &collected));
+        current.extend(collected.ops);
+    }
     if update {
-        return match write_lock(root, &current) {
+        findings.extend(match write_lock(root, &current) {
             Ok(()) => Vec::new(),
             Err(e) => vec![Finding::new(
                 "surface-snapshot",
@@ -109,10 +147,11 @@ pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
                 e,
                 "make the directory writable or pass a writable workspace root.",
             )],
-        };
+        });
+        return findings;
     }
     let Some(locked) = read_lock(root) else {
-        return vec![Finding::new(
+        findings.push(Finding::new(
             "surface-snapshot",
             LOCK_PATH.to_string(),
             format!(
@@ -121,12 +160,13 @@ pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
             ),
             "run `gabion check --update-surfaces` and commit the file. The lock is what makes \
              'this method is now callable by an agent' visible in a diff.",
-        )];
+        ));
+        return findings;
     };
     let added: Vec<&String> = current.difference(&locked).collect();
     let removed: Vec<&String> = locked.difference(&current).collect();
     if added.is_empty() && removed.is_empty() {
-        return Vec::new();
+        return findings;
     }
     let mut detail = Vec::new();
     if !added.is_empty() {
@@ -135,14 +175,15 @@ pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
     if !removed.is_empty() {
         detail.push(format!("- gone: {}", names(&removed)));
     }
-    vec![Finding::new(
+    findings.push(Finding::new(
         "surface-snapshot",
         LOCK_PATH.to_string(),
         detail.join("; "),
         "the public surface changed. Every method in a #[service] trait is callable by every \
          caller, including agents, so this is an API change: review it, then run \
          `gabion check --update-surfaces` and commit the lock.",
-    )]
+    ));
+    findings
 }
 
 fn names(items: &[&String]) -> String {
