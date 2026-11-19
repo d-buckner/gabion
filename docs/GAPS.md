@@ -43,20 +43,18 @@ real server and a real route, not against a client that is not built.
 | Claim | Reality |
 |---|---|
 | "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so, and spec §5 marks each generated artifact as built or not built. |
-| "OpenAPI-ready envelope" (README) | No `schemars`, no OpenAPI export, no contract snapshot. Nothing in the repo emits a schema. |
 | cargo-mend-style visibility check (spec §7) | Not built. `pub` past the wall is unpoliced. |
 | Generated conformance suite across all four adapters (spec §8) | Not built. `TodoServiceImpl` is exercised through clap and axum by hand, never checked for agreement. |
 | `gabion dev` (spec §9) | Not built. |
 
 Two rows that were here are closed and recorded in §7: `unsafe_code = "forbid"`
-workspace-wide, and the glob re-export wall.
+workspace-wide, the glob re-export wall, and the OpenAPI envelope.
 
 ## 4. Not built
 
 - **`gabion new`** — no scaffolding, so every app starts by copying the example
   and hoping it copies the walls too. This is the gap that most limits the
   framework being used by anyone else.
-- **`gabion-codegen`** — OpenAPI export and reviewable contract snapshots.
 - **MCP surface**, **generated typed client** (`InProcess` + `Http` impls).
 - **Per-call `Ctx`** (principal, tenant, trace-id, cancellation) — decided, not
   implemented. Until it lands, no surface can carry a caller identity, so
@@ -217,6 +215,24 @@ browser is a thin client over HTTP (spec §10), which is also not built.
   taken in two steps. The gate keeps the tighter of the two now. Proven by
   `an_app_cannot_loosen_a_required_threshold`.
 
+- **Nothing emitted a schema.** README promised an OpenAPI-ready envelope and no
+  code in the repo produced a schema. `#[service]` now generates
+  `<service>_openapi()` under the `server` and `openapi` features: one OpenAPI 3.1
+  document per service, built from the types the axum handlers already
+  deserialize, with the method's doc comment as the operation summary and
+  `WireError` as the one error response. The route string is computed once and
+  shared with the router, and the document is gated on the router feature, so it
+  cannot describe a route that is not served. The example commits its document to
+  `.gabion/openapi/todo.json`, and `todo-api/tests/openapi_snapshot.rs` fails when
+  the code and the committed document disagree, fails when an op has no path or a
+  `$ref` resolves to nothing, and fails if the trait's prose stops reaching the
+  document. Regenerate with
+  `GABION_BLESS_OPENAPI=1 cargo test -p todo-api --test openapi_snapshot`.
+  Deliberate limits: one schemars contract (deserialize) describes both directions,
+  so a DTO whose serialized shape differs from its deserialized shape needs its own
+  type; and the document is opt-in per api crate, because requiring `JsonSchema` on
+  every DTO is a demand an app may not want to take on.
+
 ## 8. Gate's own gaps
 
 - **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
@@ -234,8 +250,10 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 - The wasm step builds every `*-core` crate, so an app with no `*-core` crate yet
   gets a vacuous pass on the wall proof.
 - The surface lock is a set of names, not a schema: a method that keeps its name
-  and changes its input type drifts silently. Fixing it means hashing the input
-  DTO into the lock line, which wants `schemars` (§4).
+  and changes its input type drifts silently there. The OpenAPI snapshot covers
+  that shape for a service that builds the document, and only there — a service
+  that leaves the `openapi` feature off is back to names alone. Closing it in the
+  lock itself means hashing the input schema into the lock line.
 
 ## 9. Cheapest fixes available
 

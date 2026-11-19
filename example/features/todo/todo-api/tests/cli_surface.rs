@@ -8,6 +8,7 @@ use gabion::prelude::*;
 /// A success value whose `Serialize` impl always fails. The generated dispatch
 /// used to swallow that error: empty stdout and exit code 0, which reads as a
 /// successful call to every caller, script, and agent in the chain.
+#[derive(JsonSchema)]
 pub struct Broken;
 
 impl gabion::serde::Serialize for Broken {

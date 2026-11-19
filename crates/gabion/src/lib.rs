@@ -6,12 +6,14 @@
 pub mod caps;
 pub mod cli;
 pub mod error;
+pub mod openapi;
 pub mod testing;
 
 pub use gabion_macros::service;
 
-/// Re-exported so app crates don't pin serde/serde_json themselves.
+/// Re-exported so app crates don't pin serde/serde_json/schemars themselves.
 pub use async_trait::async_trait;
+pub use schemars;
 pub use serde;
 pub use serde_json;
 
@@ -23,5 +25,6 @@ pub mod prelude {
     };
     pub use crate::error::{ErrorKind, ServiceError, WireError};
     pub use crate::service;
+    pub use schemars::JsonSchema;
     pub use serde::{Deserialize, Serialize};
 }
