@@ -19,7 +19,7 @@ use crate::source::{regions_of, scan_comments, Comment};
 mod branches;
 mod rules;
 use branches::branch_rule;
-use rules::{allow_audit, comment_rule, host_logic_rule, silent_default_rule};
+use rules::{allow_audit, comment_rule, contract_glob_rule, host_logic_rule, silent_default_rule};
 
 #[must_use]
 pub fn check_crate(krate: &Crate, cfg: &Config) -> Vec<Finding> {
@@ -68,6 +68,7 @@ fn check_file(krate: &Crate, cfg: &Config, path: &Path, content: &str, out: &mut
     let regions = regions_of(&file);
     out.extend(comment_rule(krate, path, &file, &comments, &regions));
     out.extend(silent_default_rule(krate, path, &file));
+    out.extend(contract_glob_rule(krate, path, &file));
     out.extend(host_logic_rule(krate, path, &file));
     out.extend(allow_audit(krate, path, &file, &regions));
     out.extend(branch_rule(krate, path, &file, cfg.max_branches));

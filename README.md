@@ -87,14 +87,16 @@ reimplement a linter.
 | `wasm` | Every `*-core` crate builds for `wasm32-unknown-unknown`. This is the wall proof, run per feature. |
 | `edges` | Every `Cargo.toml` against the edge table: process wall, feature wall, contract purity, no upward leak, no host dependency. |
 | `clippy.toml` | The required bans and thresholds are still present. A deleted wall is a named failure. |
+| `workspace lints` | `[workspace.lints]` still forbids unsafe and denies the clippy wall, and every member still opts into it. |
 | `surfaces` | `.gabion/surfaces.lock` matches the set of reachable operations. Publishing a new one is a reviewable diff. |
-| `sources` | No comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs. |
+| `sources` | No comments in `*-core` bodies, no silent defaults, no glob re-export from a contract, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs. |
 
 Two rules are the point of the whole design:
 
 - **`clippy-config`** fails the build when someone loosens a threshold or deletes
-  a ban instead of fixing the code. The wall cannot be negotiated away in a
-  one-line diff.
+  a ban instead of fixing the code. Its sibling **`workspace-lints`** does the same
+  for `[workspace.lints]`, including a member that never opts in. The wall cannot
+  be negotiated away in a one-line diff.
 - **`effect-home-allow`** fails the build when an `#[allow]` for a gabion-managed
   lint appears outside a declared effect home. The escape hatch stays visible and
   audited. One line in a named crate, not twelve scattered ones.
@@ -279,7 +281,9 @@ label. A name must end in `-api`, `-core`, `-render`, or `-shared`, start with
 unclassified crate slips past the whole edge table.
 
 The required bans and clippy thresholds work the other way. An app may tighten
-them through `max-thresholds`. The gate only ever tightens them.
+them through `max-thresholds`. The gate only ever tightens them: a value that
+would raise a limit is ignored, and the raised `clippy.toml` is then a
+`clippy-config` finding.
 
 ## Status
 
@@ -291,20 +295,19 @@ to wasm, and the gate passes on this repo.
 for clap and axum, the capability model (`Clock`, `Store`, `Random`, `Sleep`,
 `Http`, plus a `timeout` combinator) with native and deterministic test impls, an
 error model that survives the wire (`WireError`), the effect ban across time, env,
-process, fs, net, and threads, `gabion check` with a failing fixture per rule, and
-CI for GitHub Actions.
+process, fs, net, and threads, the Cargo.toml wall itself (`unsafe_code = "forbid"`
+with every member opted in), `gabion check` with a failing fixture per rule, and
+CI on GitHub Actions.
 
 **Not built:** the MCP surface, the generated typed client, `gabion new`
 scaffolding, per-call `Ctx` (so caller identity and authorization are not
 representable yet), OpenAPI export, and the conformance suite that drives one
 impl through every adapter.
 
-**Claimed but not enforced yet:** `unsafe_code = "forbid"` is not set anywhere, so
-the spec claims a block that does not exist. The surface lock records method
+**Claimed but not enforced yet:** the surface lock records method
 names, not input types, so a method that keeps its name and changes its input
-shape drifts silently. And no CI run has ever executed: the GitHub Actions
-workflow is configured and the Forgejo one is valid, but no runner is registered,
-so the gate is enforced locally and by review, not by the server.
+shape drifts silently. The Forgejo workflow still has no runner; GitHub Actions
+runs the gate on every push and pull request, and that is what enforces it.
 
 [docs/GAPS.md](docs/GAPS.md) is the full inspection log, ordered by how much
 damage each silence does. The house rule there: a gap closes when a failing test

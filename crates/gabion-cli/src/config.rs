@@ -65,6 +65,11 @@ pub struct Config {
     pub required_bans: Vec<String>,
     /// clippy.toml threshold key -> the loosest value still allowed.
     pub max_thresholds: BTreeMap<String, i64>,
+    /// `[workspace.lints.rust]` lint -> the loosest level still allowed. The
+    /// rustc-side wall the spec claims (unsafe code).
+    pub required_rust_lints: BTreeMap<String, String>,
+    /// `[workspace.lints.clippy]` lint -> the loosest level still allowed.
+    pub required_clippy_lints: BTreeMap<String, String>,
 }
 
 impl Default for Config {
@@ -77,6 +82,8 @@ impl Default for Config {
             max_branches: 10,
             required_bans: default_required_bans(),
             max_thresholds: default_thresholds(),
+            required_rust_lints: default_required_rust_lints(),
+            required_clippy_lints: default_required_clippy_lints(),
         }
     }
 }
@@ -128,6 +135,29 @@ fn default_thresholds() -> BTreeMap<String, i64> {
     m.insert("too-many-lines-threshold".to_string(), 80);
     m.insert("too-many-arguments-threshold".to_string(), 6);
     m.insert("type-complexity-threshold".to_string(), 150);
+    m
+}
+
+/// The rustc wall the spec promises: no unsafe anywhere, and the ban is set once
+/// for the whole workspace rather than per crate.
+fn default_required_rust_lints() -> BTreeMap<String, String> {
+    let mut m = BTreeMap::new();
+    m.insert("unsafe_code".to_string(), "forbid".to_string());
+    m
+}
+
+/// The clippy half of the same block. `disallowed_*` is what makes the effect
+/// ban in clippy.toml bite.
+fn default_required_clippy_lints() -> BTreeMap<String, String> {
+    let mut m = BTreeMap::new();
+    for (lint, level) in [
+        ("unwrap_used", "deny"),
+        ("expect_used", "deny"),
+        ("disallowed_types", "deny"),
+        ("disallowed_methods", "deny"),
+    ] {
+        m.insert(lint.to_string(), level.to_string());
+    }
     m
 }
 
@@ -192,7 +222,10 @@ impl Config {
         if let Some(table) = gabion.get("max-thresholds").and_then(toml::Value::as_table) {
             for (key, v) in table {
                 if let Some(n) = v.as_integer() {
-                    self.max_thresholds.insert(key.clone(), n);
+                    // Only ever tighten. A key that could raise a limit would
+                    // loosen the audit that reads this same map.
+                    let max = self.max_thresholds.get(key).copied().unwrap_or(i64::MAX);
+                    self.max_thresholds.insert(key.clone(), n.min(max));
                 }
             }
         }

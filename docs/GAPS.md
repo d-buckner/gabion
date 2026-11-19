@@ -42,13 +42,14 @@ real server and a real route, not against a client that is not built.
 
 | Claim | Reality |
 |---|---|
-| "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so; spec §5 describes the intended shape. |
-| `unsafe_code = "forbid"` workspace-wide (spec §7) | Not set anywhere. No `[workspace.lints.rust]` section exists. One line to fix; deliberately not bundled into this PR. |
-| clippy `wildcard_imports` deny on contract (spec §7) | Not set. |
+| "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so, and spec §5 marks each generated artifact as built or not built. |
 | "OpenAPI-ready envelope" (README) | No `schemars`, no OpenAPI export, no contract snapshot. Nothing in the repo emits a schema. |
 | cargo-mend-style visibility check (spec §7) | Not built. `pub` past the wall is unpoliced. |
 | Generated conformance suite across all four adapters (spec §8) | Not built. `TodoServiceImpl` is exercised through clap and axum by hand, never checked for agreement. |
 | `gabion dev` (spec §9) | Not built. |
+
+Two rows that were here are closed and recorded in §7: `unsafe_code = "forbid"`
+workspace-wide, and the glob re-export wall.
 
 ## 4. Not built
 
@@ -189,15 +190,40 @@ browser is a thin client over HTTP (spec §10), which is also not built.
   (`.gabion/surfaces.lock`), not an annotation on each one. Proven by
   `surface_drift_is_a_finding` and `updating_the_lock_clears_the_finding`.
 
+- **The spec claimed a Cargo.toml wall that did not exist.** `unsafe_code =
+  "forbid"` workspace-wide was in spec §7, and there was no `[workspace.lints]`
+  section anywhere to set it. Now the workspace sets it, every member opts into
+  it, and the new `workspace-lints` rule audits the block the way `clippy-config`
+  audits clippy.toml: a missing section, a level lowered to `warn`, and a member
+  that never opts in are each named findings. Proven by
+  `a_workspace_with_no_lints_block_is_a_finding`, `a_loosened_workspace_lint_is_a_finding`,
+  and `a_member_that_skips_the_workspace_lints_is_a_finding`, and by an `unsafe`
+  block in `crates/gabion` failing `cargo clippy`. Cargo itself rejects a member
+  that opts into a block the workspace never declared, so the two ways to be
+  missing always travel together.
+- **A contract could re-export a whole module.** Spec §7 said clippy
+  `wildcard_imports` deny on contract would stop glob re-exports across the wall.
+  clippy does not lint `pub use` globs — measured on rust 1.99, `use
+  crate::inner::*` is a finding and `pub use inner::*` is silent. The re-export is
+  the case that matters, because the re-export is the one that publishes. The new
+  `contract-glob` rule reads the contract crates and names a `pub use` whose tree
+  contains a glob. Proven by `a_glob_reexport_in_a_contract_is_a_finding`, and the
+  glob sits in the `every_rule_bites` fixture so the rule cannot go quiet.
+- **An app could loosen the audit that audits it.** README says an app may tighten
+  the clippy thresholds through `max-thresholds`, and that the gate only ever
+  tightens them. `Config::apply` took the app's value outright, so
+  `max-thresholds = { cognitive-complexity-threshold = 999 }` in an app's own
+  Cargo.toml raised the limit `clippy-config` enforces: the delete-the-wall diff
+  taken in two steps. The gate keeps the tighter of the two now. Proven by
+  `an_app_cannot_loosen_a_required_threshold`.
+
 ## 8. Gate's own gaps
 
 - **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
   commit status appears on PRs, but it sits at *Pending* indefinitely and
   `fj actions tasks` reports no tasks — no runner is registered on the instance.
-  `.github/workflows/ci.yml` is configured for the move to GitHub and is the
-  same one command. Until one of the two actually executes, the gate is enforced
-  locally and by whoever reviews a PR. This is the difference between a wall and
-  a drawing of a wall, so it is the first thing to fix.
+  GitHub Actions runs the same one command on every push and pull request, and
+  that is what enforces the wall today.
 - `cargo shear` and `cargo deny` are assumed installed; CI installs them, a fresh
   laptop does not have them. `gabion check` reports the step as failed rather
   than "tool missing", which is misleading.
@@ -213,9 +239,6 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 
 ## 9. Cheapest fixes available
 
-- Register a CI runner (§8) — until then the gate is a local promise. GitHub
-  Actions is configured (`.github/workflows/ci.yml`) and just needs a repo to
-  run on.
-- `unsafe_code = "forbid"` in `[workspace.lints.rust]`: one line, and the spec
-  already claims it.
 - A `Random`/`IdGen` capability, which unblocks the id collision in 1.2.
+- The visibility check spec §7 claims (`pub` past the wall), which is the last
+  wall in that table with nothing behind it.
