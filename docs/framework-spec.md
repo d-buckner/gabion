@@ -255,7 +255,8 @@ Signed off in the v0.1 audit:
 4. **Dune's comment ban is adopted, scoped to `*-core` fn bodies.** Doc comments
    on public items stay required — codegen and OpenAPI read them.
 
-Still open:
+Still open (see `docs/GAPS.md` for the full log, ordered by how much damage the
+silence does):
 
 1. Renderer: agnostic + Dioxus template (recommended) vs bundled renderer stack.
 2. Wire format: JSON-only v1 vs CBOR option.

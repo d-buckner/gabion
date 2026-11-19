@@ -121,7 +121,8 @@ threads / env / process / fs / net.
 
 **Not built yet:** the MCP surface, the generated typed client, `gabion new`
 scaffolding, per-call `Ctx`, and error round-tripping over the wire
-(`WireError`). See `docs/framework-spec.md` for the signed-off decisions behind
-each.
+(`WireError`). See [docs/GAPS.md](docs/GAPS.md) for the full inspection log —
+including the places a wall is claimed but not yet enforced — and
+`docs/framework-spec.md` for the signed-off decisions behind each.
 
 MIT or Apache-2.0 dual licensed.
