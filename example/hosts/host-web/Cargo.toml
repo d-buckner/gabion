@@ -1,0 +1,22 @@
+[package]
+name = "host-web"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+description = "Web host (cdylib): proves the whole stack — api + core + render — compiles to wasm32-unknown-unknown."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gabion = { workspace = true }
+todo-api = { path = "../../features/todo/todo-api" }
+todo-core = { path = "../../features/todo/todo-core" }
+todo-render = { path = "../../features/todo/todo-render" }
+dioxus = { workspace = true, features = ["web", "launch"] }
+wasm-bindgen = { workspace = true }
+
+[lints]
+workspace = true

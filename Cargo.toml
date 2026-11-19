@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gabion",
+    "crates/gabion-cli",
+    "crates/gabion-macros",
+    "crates/gabion-native",
+    "example/features/todo/todo-api",
+    "example/features/todo/todo-core",
+    "example/features/todo/todo-render",
+    "example/hosts/host-native",
+    "example/hosts/host-server",
+    "example/hosts/host-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# gabion's own gate configuration. `gabion check` reads this; `gabion new`
+# generates the same block into every app it scaffolds.
+[workspace.metadata.gabion]
+# The gabion runtime itself: never allowed to depend on a feature crate.
+framework-crates = ["gabion", "gabion-macros", "gabion-native", "gabion-cli"]
+# gabion-cli is a dev tool: it spawns processes and reads env by definition,
+# so it is a declared effect home and `gabion check` audits that fact.
+effect-homes = ["gabion-cli"]
+max-file-lines = 400
+max-branches = 10
+
+# Allowed edges. Anything not listed here fails the `edge-table` rule.
+[workspace.metadata.gabion.edges]
+api = ["framework", "shared", "api"]
+core = ["framework", "shared", "api"]
+render = ["framework", "shared", "api"]
+shared = ["framework"]
+host = ["framework", "shared", "api", "core", "render"]
+framework = ["framework"]
+unclassified = []
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+# Effect ban for *-core crates (see clippy.toml for the disallowed list).
+# std::time compiles on wasm (it only panics at runtime), so the target alone
+# does NOT catch it — this gate does. Apps re-declare it in their core crates.
+disallowed_types = "deny"
+disallowed_methods = "deny"
+
+# Size and complexity gates (uniform thresholds, values in clippy.toml).
+# The shortcut these seal: one 200-line match instead of a named function.
+cognitive_complexity = "deny"
+too_many_lines = "deny"
+too_many_arguments = "deny"
+type_complexity = "deny"
+
+[workspace.dependencies]
+gabion = { path = "crates/gabion" }
+gabion-macros = { path = "crates/gabion-macros" }
+gabion-native = { path = "crates/gabion-native" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+clap = "4"
+dioxus = { version = "0.7", default-features = false }
+wasm-bindgen = "0.2"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

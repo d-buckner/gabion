@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framework Spec — Dune-inspired Rust, one core · four surfaces</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/rust.min.js"></script>
+<style>
+:root{
+  --bg:#08090a; --panel:#101114; --panel2:#16171d; --border:#23242c; --border2:#2a2b33;
+  --text:#d0d6e0; --text-dim:#8a8f98; --text-faint:#62666d;
+  --accent:#5e6ad2; --accent-soft:rgba(94,106,210,.14);
+  --green:#4cb782; --red:#eb5757; --amber:#e2a336;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1280px;margin:0 auto}
+/* sidebar */
+nav{position:sticky;top:0;height:100vh;overflow-y:auto;padding:32px 20px;border-right:1px solid var(--border);font-size:13.5px}
+nav .brand{font-weight:700;font-size:15px;color:#fff;margin-bottom:4px}
+nav .brand span{color:var(--accent)}
+nav .sub{color:var(--text-faint);font-size:11.5px;margin-bottom:24px}
+nav a{display:block;color:var(--text-dim);text-decoration:none;padding:5px 10px;border-radius:6px;margin-bottom:1px}
+nav a:hover{color:var(--text);background:var(--panel2)}
+nav a.active{color:#fff;background:var(--accent-soft);border-left:2px solid var(--accent)}
+main{padding:48px 56px 120px;min-width:0}
+/* hero */
+.hero{border:1px solid var(--border);border-radius:14px;padding:36px 40px;margin-bottom:48px;background:linear-gradient(160deg,var(--panel) 0%,#0c0d12 100%)}
+.hero h1{font-size:30px;font-weight:700;color:#fff;letter-spacing:-.02em;line-height:1.25}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero p{color:var(--text-dim);margin-top:12px;max-width:70ch}
+.badges{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.badge{font-family:var(--mono);font-size:11.5px;padding:4px 10px;border-radius:99px;border:1px solid var(--border2);color:var(--text-dim)}
+.badge.ok{color:var(--green);border-color:rgba(76,183,130,.4)}
+.badge.open{color:var(--amber);border-color:rgba(226,163,54,.4)}
+/* sections */
+section{margin-bottom:64px}
+h2{font-size:22px;font-weight:600;color:#fff;letter-spacing:-.01em;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:20px}
+h2 .num{color:var(--accent);font-family:var(--mono);font-size:16px;margin-right:10px}
+h3{font-size:16px;font-weight:600;color:#e6e9ee;margin:28px 0 10px}
+p{margin-bottom:14px;max-width:82ch}
+p.dim{color:var(--text-dim)}
+strong{color:#fff;font-weight:600}
+code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--border);padding:1.5px 6px;border-radius:5px;color:#c8cdd6}
+pre{background:#0d0e12;border:1px solid var(--border);border-radius:10px;padding:18px 20px;overflow-x:auto;margin:16px 0;font-size:13.5px;line-height:1.6}
+pre code{background:none;border:none;padding:0;font-size:inherit;color:inherit}
+/* callouts */
+.callout{border:1px solid var(--border2);border-left:3px solid var(--accent);background:var(--panel);border-radius:8px;padding:16px 20px;margin:18px 0;font-size:15px}
+.callout.decided{border-left-color:var(--green)}
+.callout.warn{border-left-color:var(--amber)}
+.callout .tag{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:6px}
+.callout.decided .tag{color:var(--green)}
+.callout.warn .tag{color:var(--amber)}
+/* tables */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+th{text-align:left;font-weight:600;color:#fff;background:var(--panel2);border:1px solid var(--border);padding:9px 14px;font-size:13px}
+td{border:1px solid var(--border);padding:9px 14px;vertical-align:top;color:var(--text-dim)}
+td:first-child{color:var(--text)}
+tr:hover td{background:rgba(255,255,255,.015)}
+td code,th code{white-space:nowrap}
+.ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)}
+/* mermaid */
+.diagram{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;margin:20px 0;overflow-x:auto}
+.diagram .cap{font-size:12.5px;color:var(--text-faint);text-align:center;margin-top:10px;font-family:var(--mono)}
+.mermaid{display:flex;justify-content:center}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.card h4{font-size:14.5px;color:#fff;margin-bottom:6px}
+.card p{font-size:13.5px;color:var(--text-dim);margin:0}
+.card .rec{font-family:var(--mono);font-size:10.5px;color:var(--green);letter-spacing:.06em;text-transform:uppercase}
+/* steps */
+ol.steps{list-style:none;counter-reset:s;margin:16px 0}
+ol.steps li{counter-increment:s;position:relative;padding:0 0 22px 46px;border-left:1px solid var(--border2);margin-left:16px}
+ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+ol.steps li::before{content:counter(s);position:absolute;left:-16px;top:0;width:32px;height:32px;border-radius:50%;background:var(--accent-soft);border:1px solid var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px}
+ol.steps li b{color:#fff}
+ul{margin:0 0 14px 22px}
+li{margin-bottom:6px;max-width:82ch}
+footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--border);color:var(--text-faint);font-size:13px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:none}main{padding:32px 20px}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="nav">
+  <div class="brand">fw<span>·</span>spec</div>
+  <div class="sub">Dune-inspired Rust framework</div>
+  <a href="#goal">1 · Goal</a>
+  <a href="#nongoals">2 · Non-goals</a>
+  <a href="#decision">3 · Load-bearing decision</a>
+  <a href="#layout">4 · Layout &amp; walls</a>
+  <a href="#contract">5 · One trait, four surfaces</a>
+  <a href="#caps">6 · Capabilities</a>
+  <a href="#lints">7 · Lint rulebook</a>
+  <a href="#verify">8 · Verification</a>
+  <a href="#crates">9 · Framework crates</a>
+  <a href="#open">10 · Open decisions</a>
+  <a href="#spikes">11 · Experiments</a>
+</nav>
+<main>
+
+<div class="hero">
+  <h1>One business core. Four surfaces.<br><em>Shortcuts mechanically sealed.</em></h1>
+  <p>A Rust framework for single-binary apps whose business logic runs natively, in the browser as wasm, and on a server — exposed automatically as CLI, HTTP API, MCP tools, and a typed client. Inspired by <strong>Dune</strong>, the Grok&nbsp;Bot client architecture: agents take shortcuts, so the shortest path must be the correct path. Enforcement is mechanical — crate graph, compile targets, lint gates — never a standard the author has to remember.</p>
+  <div class="badges">
+    <span class="badge">DRAFT v0</span>
+    <span class="badge ok">DECIDED · pure core (Option B)</span>
+    <span class="badge open">6 open decisions</span>
+    <span class="badge">rust · wasm32 · axum · rmcp · clap</span>
+  </div>
+</div>
+
+<section id="goal">
+<h2><span class="num">01</span>Goal</h2>
+<p>Build single-binary Rust apps where the <strong>same business logic</strong> runs:</p>
+<ul>
+  <li>natively — CLI + native renderer, core in-process</li>
+  <li>in the browser as wasm — renderer + in-process core (local-first)</li>
+  <li>on a server — HTTP API + MCP</li>
+</ul>
+<p>with <strong>zero duplication</strong> of business logic. Every service operation is automatically available as a CLI subcommand, an HTTP endpoint, an MCP tool, and a typed client call — generated from one definition.</p>
+</section>
+
+<section id="nongoals">
+<h2><span class="num">02</span>Non-goals (v1)</h2>
+<ul>
+  <li><strong>Not a UI framework.</strong> The renderer is pluggable; Dioxus is the recommended default (only mature native+wasm UI stack). <span class="warn">[OPEN: renderer-agnostic vs bundled]</span></li>
+  <li>No streaming/SSE surfaces in v1 (contract shape reserved for it).</li>
+  <li>No mobile targets.</li>
+  <li>Not a web framework replacement: axum / rmcp / clap are used internally, not rebuilt.</li>
+</ul>
+</section>
+
+<section id="decision">
+<h2><span class="num">03</span>The load-bearing decision</h2>
+<div class="callout decided">
+  <span class="tag">Decided — Option B</span>
+  The service core is <strong>pure and target-agnostic</strong>. It compiles for <code>wasm32-unknown-unknown</code> and native. No tokio, no <code>std::fs/net/time/thread</code> inside core. All effects (clock, storage, network, sleep, randomness) are <strong>capability traits</strong> with per-target implementations supplied by the host.
+</div>
+<p>The rejected alternative (Option A) kept the core server-only and shipped a wasm UI over HTTP — Dioxus fullstack's model. It's simpler, but then "works natively and for web" means the <em>UI</em> works everywhere, not the app. Option B makes the web build a real runtime for the business logic: local-first is possible, and the same core is testable with zero I/O.</p>
+<div class="callout">
+  <span class="tag">Key insight</span>
+  The compile target itself is the strongest lint. A service fn that reaches for <code>std::fs</code> compiles natively and <strong>fails on wasm</strong> — the shortcut is mechanically sealed, not reviewed.
+</div>
+</section>
+
+<section id="layout">
+<h2><span class="num">04</span>Layout: feature-first, sealed per feature</h2>
+<p>Dune's other half is <strong>colocation</strong>: everything about a feature lives in one folder, and cross-feature imports are blocked except through a feature's public surface. Two orthogonal walls, both enforced by the <strong>crate graph</strong> (not lints):</p>
+<ul>
+  <li><strong>Process wall</strong> (Dune: main ↔ renderer): render may only import the feature's <code>api</code> crate — never core internals.</li>
+  <li><strong>Feature wall</strong> (Dune: cross-feature import ban): feature A may import feature B's <code>api</code> only — never B's <code>core</code> or <code>render</code>.</li>
+</ul>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph PLAT["platform/"]
+    fw["fw · fw-macros · fw-lints"]
+    shared["myapp-shared<br/><i>Id&lt;T&gt;, Money, Page&lt;T&gt;, AppError</i>"]
+  end
+  subgraph T["features/todo/"]
+    t_api["todo-api<br/><i>wire types + trait</i>"]
+    t_core["todo-core<br/><i>pure impl</i>"]
+    t_render["todo-render<br/><i>UI</i>"]
+  end
+  subgraph B["features/billing/"]
+    b_api["billing-api"]
+    b_core["billing-core"]
+    b_render["billing-render"]
+  end
+  subgraph H["hosts/"]
+    native["host-native"]
+    server["host-server"]
+    web["host-web"]
+  end
+  t_core --> t_api
+  t_render --> t_api
+  t_core --> shared
+  t_core -.->|"client only"| b_api
+  shared --> fw
+  native --> t_core
+  native --> t_render
+  server --> t_core
+  web --> t_render
+  t_render -.->|"✗ unrepresentable"| t_core
+  t_core -.->|"✗ unrepresentable"| b_core
+  linkStyle 9,10 stroke:#eb5757,color:#eb5757,stroke-dasharray:5 5
+</pre>
+<div class="cap">allowed edges solid · forbidden edges red — blocked by Cargo.toml, not by review</div>
+</div>
+
+<h3>Why 3 crates per feature instead of 3 modules</h3>
+<p>Cargo.toml dependencies <strong>are</strong> the import ban: a crate can only <code>use</code> what's in its <code>[dependencies]</code>. With module-per-feature you'd need arch-lint to police <code>use crate::todo::core::…</code> from render code; with crate-per-feature the import is unrepresentable. <code>fw feature add todo</code> generates the boilerplate, so colocation costs nothing for humans or agents. Compile time is fine: api crates are types-only and fast; cargo parallelizes small crates.</p>
+
+<h3>Allowed edges <span class="dim" style="font-weight:400;font-size:13px">(fw check audits every Cargo.toml against this table)</span></h3>
+<table>
+<tr><th>Crate</th><th>May depend on</th></tr>
+<tr><td><code>X-api</code></td><td>fw, shared, other features' <code>*-api</code></td></tr>
+<tr><td><code>X-core</code></td><td>X-api, shared, other features' <code>*-api</code></td></tr>
+<tr><td><code>X-render</code></td><td>X-api, shared, ui kit — <span class="bad">NOT any *-core</span></td></tr>
+<tr><td>hosts</td><td>all <code>*-core</code> + <code>*-render</code> (composition only)</td></tr>
+<tr><td>shared</td><td>fw only — <span class="bad">never any feature</span></td></tr>
+</table>
+
+<p>Cross-feature calls: <code>todo-core</code> may depend on <code>billing-api</code> and receive billing's client (in-proc or HTTP) — never billing's internals. Dune's "features talk through their public surface" rule, made physical.</p>
+
+<div class="callout">
+  <span class="tag">Registration without wiring</span>
+  <code>#[service]</code> registers each impl via <code>linkme</code> distributed-slice; hosts auto-collect routes / tools / subcommands with zero manual registration. An agent adds a feature folder and it appears in all four surfaces. <code>fw check</code> audits the Cargo.toml edge table, so a hand-added forbidden dep — the agent "shortcut" — fails CI with a message naming the wall rule violated. DTOs live in <code>*-api</code>, not <code>*-core</code>: put one in core and render gets an immediate compile error pointing at the wall — the error message is the documentation.
+</div>
+</section>
+
+<section id="contract">
+<h2><span class="num">05</span>The contract: one trait, four surfaces</h2>
+<pre><code class="language-rust">// features/todo/todo-api/src/lib.rs
+use fw::prelude::*;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CreateTodo { pub title: String }
+
+#[derive(FwError)]            // one error enum -> HTTP status, MCP error, CLI exit code
+pub enum TodoError { #[code(404)] NotFound }
+
+#[service]                   // generates client, router, clap, mcp, openapi
+pub trait TodoService {
+    #[surface(cli, http, mcp)]
+    async fn create(&amp;self, input: CreateTodo) -&gt; Result&lt;Todo, TodoError&gt;;
+
+    #[surface(cli, http)]
+    async fn list(&amp;self, q: ListQuery) -&gt; Result&lt;Vec&lt;Todo&gt;, TodoError&gt;;
+
+    #[internal]              // explicit opt-out; required or surface-completeness lint fails
+    async fn recompute_stats(&amp;self) -&gt; ();
+}</code></pre>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  def["trait TodoService<br/>one async fn"] --> mac["#[service] macro"]
+  mac --> ax["axum route<br/>POST /api/todo.create"]
+  mac --> mc["rmcp tool<br/>(JsonSchema → input schema)"]
+  mac --> cl["clap subcommand<br/>myapp todo create"]
+  mac --> oa["OpenAPI 3.1"]
+  mac --> cli["generated client trait"]
+  cli --> ip["InProcess impl<br/>native · zero serialization"]
+  cli --> ht["Http impl<br/>wasm-safe fetch"]
+  linkStyle 0,1,2,3,4,5 stroke:#5e6ad2
+  linkStyle 6 stroke:#4cb782
+  linkStyle 7 stroke:#4cb782
+</pre>
+<div class="cap">one definition → four surfaces · the renderer never knows which client it got</div>
+</div>
+
+<p><code>#[service]</code> generates, feature-gated so each host compiles only what it needs:</p>
+<table>
+<tr><th>Feature</th><th>Generated artifact</th><th>Used by</th></tr>
+<tr><td><code>(default)</code></td><td>wire types + <code>TodoServiceClient</code> trait + <code>Http</code> impl (fetch-based, wasm-safe)</td><td>render, web</td></tr>
+<tr><td><code>inproc</code></td><td><code>InProcess</code> client impl (direct call, zero serialization)</td><td>native host</td></tr>
+<tr><td><code>server</code></td><td>axum routes + OpenAPI 3.1 doc</td><td>server host</td></tr>
+<tr><td><code>mcp</code></td><td>rmcp tool definitions (schemas from JsonSchema)</td><td>server host</td></tr>
+<tr><td><code>cli</code></td><td>clap subcommand mapping</td><td>native host</td></tr>
+</table>
+<p>The renderer calls <code>client.create(input)</code>. On native that's an in-process call; on web it's a POST to the server. Same signature, same types, same errors. This is the Dioxus <code>#[server]</code> dual-codegen pattern, generalized to four surfaces and enforced by the crate wall.</p>
+<p class="dim">Wire format: JSON, one POST per method (<code>POST /api/todo.create</code>), args as body, <code>Result&lt;T, E&gt;</code> envelope. OpenAPI exported from the same source for public API docs and external codegen. <span class="warn">[OPEN: CBOR/MessagePack option for wasm payload size]</span></p>
+</section>
+
+<section id="caps">
+<h2><span class="num">06</span>Capabilities (effects)</h2>
+<pre><code class="language-rust">// features/todo/todo-core/src/caps.rs
+pub trait Caps {
+    type Clock: Clock;        // fn now(&amp;self) -&gt; Timestamp
+    type Store: Store;        // key-value/doc store; native: redb, wasm: IndexedDB
+    // Sleep, Random, Http... each a small trait
+}
+
+pub struct TodoServiceImpl&lt;C: Caps&gt; { caps: C }
+impl&lt;C: Caps&gt; TodoService for TodoServiceImpl&lt;C&gt; { /* business logic */ }</code></pre>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph CORE["todo-core — pure, wasm-safe"]
+    logic["business logic"] --> caps["trait Caps"]
+  end
+  nc["NativeCaps<br/>tokio clock · redb store"] -->|host-native / host-server| caps
+  wc["WebCaps<br/>js Date · IndexedDB"] -->|host-web| caps
+  mc["MockCaps<br/>fixed clock · memory store"] -->|tests| caps
+  linkStyle 1 stroke:#5e6ad2
+  linkStyle 2 stroke:#4cb782
+  linkStyle 3 stroke:#e2a336
+</pre>
+<div class="cap">core is async but runtime-free — hosts drive the futures (tokio native, JS event loop on wasm)</div>
+</div>
+
+<ul>
+  <li>Core returns futures; no tokio dependency in core.</li>
+  <li>Native host wires <code>NativeCaps</code> (tokio clock, redb/sqlx store).</li>
+  <li>Web host wires <code>WebCaps</code> (js Date, IndexedDB) — the web build can run core <strong>locally in the browser</strong> (local-first) or just use the HTTP client. Both supported; per-app choice. <span class="warn">[OPEN: default posture]</span></li>
+  <li>Storage v1: abstract <code>Store</code> trait with a redb-backed native impl (pure Rust, no C deps keeps the single-binary promise). sqlx left to the app.</li>
+</ul>
+</section>
+
+<section id="lints">
+<h2><span class="num">07</span>Lint rulebook — ban the shortcut, not the person</h2>
+<p class="dim">Each row: a shortcut an agent (or tired human) will take → the mechanical block.</p>
+<table>
+<tr><th>Shortcut</th><th>Block</th></tr>
+<tr><td>render imports any core</td><td class="ok">crate graph — unrepresentable (process wall)</td></tr>
+<tr><td>feature A imports feature B's core/render</td><td class="ok">crate graph — unrepresentable (feature wall)</td></tr>
+<tr><td>hand-edit Cargo.toml to sneak a forbidden dep</td><td><code>fw check</code> audits every Cargo.toml against the edge table</td></tr>
+<tr><td>shared depends on a feature (upward leak)</td><td>same edge-table audit</td></tr>
+<tr><td>tokio / std::fs / std::net / std::thread / std::time in any <code>*-core</code></td><td>wasm build fails + <code>clippy::disallowed_types</code> deny (native catches it early)</td></tr>
+<tr><td>effect without capability</td><td>same as above</td></tr>
+<tr><td>DTO defined in core</td><td>render compile error at the wall</td></tr>
+<tr><td>business logic in host crate</td><td>arch-lint: no type/fn definitions in hosts beyond wiring + main</td></tr>
+<tr><td>forgetting to expose an op</td><td>surface-completeness lint: every trait fn has <code>#[surface]</code> or <code>#[internal]</code></td></tr>
+<tr><td>hand-written HTTP handler bypassing contract</td><td>arch-lint: <code>axum</code> importable only in generated modules + host main</td></tr>
+<tr><td>unwrap / expect / panic in core</td><td><code>clippy::unwrap_used</code>, <code>expect_used</code> deny</td></tr>
+<tr><td>unsafe anywhere outside effects</td><td><code>unsafe_code = "forbid"</code> workspace-wide</td></tr>
+<tr><td>over-broad visibility (<code>pub</code> past the wall)</td><td>cargo-mend-style visibility check in CI</td></tr>
+<tr><td>glob re-exports across the wall</td><td>clippy <code>wildcard_imports</code> deny on api crates</td></tr>
+<tr><td>code comments in service bodies (Dune's ban)</td><td class="warn">custom arch-lint rule [OPEN: adopt?]</td></tr>
+</table>
+<div class="callout">
+  <span class="tag">Delivery</span>
+  The framework ships <code>fw-lints</code> (preset clippy config + arch-lint.toml + cargo-deny.toml) and <code>fw check</code> runs the full gate set in one command. CI template generated by <code>fw new</code>. The point: <strong><code>fw check</code> green == architecture correct</strong>, so an agent with zero context cannot pass CI while violating the wall.
+</div>
+</section>
+
+<section id="verify">
+<h2><span class="num">08</span>Verification story</h2>
+<p class="dim">Verification, not generation, is the bottleneck (Tan). Agents prove work by execution, not review.</p>
+<ul>
+  <li>Core is pure → deterministic unit tests with <code>MockCaps</code> (fixed clock, in-memory store).</li>
+  <li>Generated conformance suite: the same <code>TodoServiceImpl</code> is driven through all four adapters (clap invocation, axum test request, rmcp tool call, in-proc client) and must agree on outputs.</li>
+</ul>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  a["clippy<br/>fw presets"] --> b["arch-lint<br/>walls + hosts"]
+  b --> c["cargo-deny<br/>dep audit"]
+  c --> d["wasm32 build<br/>every *-core"]
+  d --> e["conformance suite<br/>4 adapters agree"]
+  e --> g(["green = architecture correct"])
+  style g fill:#123524,stroke:#4cb782,color:#4cb782
+</pre>
+<div class="cap">fw check — one command, one exit code</div>
+</div>
+</section>
+
+<section id="crates">
+<h2><span class="num">09</span>Framework's own crates</h2>
+<pre><code class="language-text">fw/            # runtime: prelude, client traits, error model, capability traits
+fw-macros/     # #[service], #[surface], #[FwError]
+fw-codegen/    # openapi export, contract snapshot (reviewable generated diff)
+fw-lints/      # presets + `fw check` driver
+fw-cli/        # `fw new`, `fw dev` (native+server+web hot reload), `fw check`</code></pre>
+<p><code>fw dev</code> runs server + wasm renderer + native CLI against one workspace with one command — the agent loop stays fast, which is half of Dune's thesis.</p>
+</section>
+
+<section id="open">
+<h2><span class="num">10</span>Open decisions</h2>
+<div class="cards">
+  <div class="card"><span class="rec">recommended</span><h4>1 · Renderer</h4><p>Agnostic + Dioxus template vs bundled renderer stack. Lean: agnostic — Dioxus is the only mature native+wasm UI.</p></div>
+  <div class="card"><span class="rec">lean: local-first</span><h4>2 · Web posture default</h4><p>Local-first (core in wasm) vs thin client over HTTP. Both supported per-app; pick the scaffold default.</p></div>
+  <div class="card"><span class="rec">lean: JSON-only</span><h4>3 · Wire format</h4><p>JSON-only v1 vs CBOR option for wasm payload size.</p></div>
+  <div class="card"><span class="rec">lean: skip</span><h4>4 · Dune's comment ban</h4><p>Adopt for service bodies? Doc comments on trait fns feed MCP tool descriptions — that's shortest-path-is-correct.</p></div>
+  <div class="card"><span class="rec">blocked</span><h4>5 · Name</h4><p>Needs registry + SERP collision sweep before publishing.</p></div>
+  <div class="card"><span class="rec">lean: v2</span><h4>6 · Streaming</h4><p><code>Stream</code> return support in the contract — v1 or v2?</p></div>
+</div>
+</section>
+
+<section id="spikes">
+<h2><span class="num">11</span>Cheapest experiments first</h2>
+<ol class="steps">
+  <li><b>Spike the walls.</b> Hand-write two features (todo, billing) × api/core/render + one host. Prove: render cannot import core, todo-core cannot import billing-core, and the wasm build of a core fails on <code>std::time</code>.</li>
+  <li><b>Spike <code>#[service]</code> v0.</b> Macro generating just the axum router + clap from the trait (skip mcp/client first). Prove one fn → two surfaces compiles.</li>
+  <li><b>Add rmcp + Http client stub.</b> Add <code>fw check</code>.</li>
+  <li><b>Only then:</b> <code>fw new</code> scaffolding + Dioxus template.</li>
+</ol>
+</section>
+
+<footer>Framework spec DRAFT v0 · 2026-11-17 · companion to framework-spec.md (source of truth until the spike validates the shape)</footer>
+</main>
+</div>
+
+<script>
+mermaid.initialize({
+  startOnLoad:true,
+  theme:'base',
+  fontFamily:'Inter',
+  fontSize:'14px',
+  flowchart:{curve:'basis',useMaxWidth:true},
+  themeVariables:{
+    primaryColor:'#16171d', primaryBorderColor:'#5e6ad2', primaryTextColor:'#d0d6e0',
+    lineColor:'#3a3b45', clusterBkg:'#0d0e12', clusterBorder:'#2a2b33',
+    edgeLabelBackground:'#16171d', tertiaryColor:'#101114'
+  }
+});
+hljs.highlightAll();
+// scroll-spy
+const links=[...document.querySelectorAll('#nav a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+const spy=new IntersectionObserver(es=>{
+  for(const e of es){ if(e.isIntersecting){
+    links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+e.target.id));
+  }}
+},{rootMargin:'-20% 0px -70% 0px'});
+secs.forEach(s=>s&&spy.observe(s));
+</script>
+</body>
+</html>

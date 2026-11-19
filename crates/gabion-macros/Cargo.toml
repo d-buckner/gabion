@@ -1,0 +1,19 @@
+[package]
+name = "gabion-macros"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+description = "#[service] macro: one trait -> typed client + axum router + clap + (v2) mcp."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true
