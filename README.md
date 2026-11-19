@@ -194,6 +194,13 @@ adding a method fails the build until you run `--update-surfaces` and commit it.
 Under this framework's own premise — agents take the shortest path — publishing a
 new callable op should never be a silent event.
 
+The lock records names, so a method that keeps its name and changes its input type
+would pass it. The shape is locked by a second artifact: `#[service]` also emits
+an OpenAPI 3.1 document built from the same types the router deserializes, the
+example commits it to `.gabion/openapi/todo.json`, and a test fails when the code
+and the committed document disagree. A changed input type is a diff you read, not
+a client that breaks in production.
+
 `#[service]` generates, behind cargo features, so each host compiles only what
 it needs:
 
@@ -296,17 +303,19 @@ for clap and axum, the capability model (`Clock`, `Store`, `Random`, `Sleep`,
 `Http`, plus a `timeout` combinator) with native and deterministic test impls, an
 error model that survives the wire (`WireError`), the effect ban across time, env,
 process, fs, net, and threads, the Cargo.toml wall itself (`unsafe_code = "forbid"`
-with every member opted in), `gabion check` with a failing fixture per rule, and
-CI on GitHub Actions.
+with every member opted in), an OpenAPI 3.1 document generated from the same trait
+as the router and committed as a reviewable contract, `gabion check` with a failing
+fixture per rule, and CI on GitHub Actions.
 
 **Not built:** the MCP surface, the generated typed client, `gabion new`
 scaffolding, per-call `Ctx` (so caller identity and authorization are not
-representable yet), OpenAPI export, and the conformance suite that drives one
-impl through every adapter.
+representable yet), and the conformance suite that drives one impl through every
+adapter.
 
 **Claimed but not enforced yet:** the surface lock records method
-names, not input types, so a method that keeps its name and changes its input
-shape drifts silently. The Forgejo workflow still has no runner; GitHub Actions
+names, not input types; the OpenAPI snapshot closes that for a service that builds
+the document, and a service that leaves the `openapi` feature off is back to names
+alone. The Forgejo workflow still has no runner; GitHub Actions
 runs the gate on every push and pull request, and that is what enforces it.
 
 [docs/GAPS.md](docs/GAPS.md) is the full inspection log, ordered by how much

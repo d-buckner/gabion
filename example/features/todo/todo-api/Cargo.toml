@@ -12,16 +12,21 @@ description = "todo feature contract: wire types + #[service] trait. Compiles ev
 default = []
 server = ["dep:axum", "dep:bytes"]
 cli = ["dep:clap"]
+# The document describes the routes the `server` feature serves, so it cannot be
+# built without them: a contract cannot describe a route that is not there.
+openapi = ["server"]
 
 [dependencies]
 gabion = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 axum = { workspace = true, optional = true }
 bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+serde_json = { workspace = true }
 
 # The generated CLI module only exists with the `cli` feature, so the test that
 # drives it is built only then. `gabion check` runs `cargo test --all-features`,
@@ -30,11 +35,16 @@ tokio = { workspace = true }
 name = "cli_surface"
 required-features = ["cli"]
 
-# These four are used only inside the code `#[service]` generates (axum handlers,
-# clap args, serde wire types), so cargo-shear cannot see them. This is the
-# tool's documented escape hatch rather than a deleted wall.
+[[test]]
+name = "openapi_snapshot"
+required-features = ["openapi"]
+
+# These five are used only inside expansion — the code `#[service]` generates
+# (axum handlers, clap args, serde wire types) and the `JsonSchema` derive — so
+# cargo-shear cannot see them. This is the tool's documented escape hatch rather
+# than a deleted wall.
 [package.metadata.cargo-shear]
-ignored = ["serde", "axum", "bytes", "clap"]
+ignored = ["serde", "axum", "bytes", "clap", "schemars"]
 
 [lints]
 workspace = true

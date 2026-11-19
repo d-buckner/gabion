@@ -1,0 +1,189 @@
+{
+  "components": {
+    "responses": {
+      "Error": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/WireError"
+            }
+          }
+        },
+        "description": "The call failed. `kind` is the machine-readable field."
+      }
+    },
+    "schemas": {
+      "CreateTodo": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "ErrorKind": {
+        "description": "Error kinds map 1:1 onto transport-level outcomes. Serialized by name, so\nthe kind survives a round trip instead of being dropped at the boundary.",
+        "enum": [
+          "not_found",
+          "invalid_input",
+          "conflict",
+          "internal"
+        ],
+        "type": "string"
+      },
+      "Todo": {
+        "properties": {
+          "created_at": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "done",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "TodoId": {
+        "type": "string"
+      },
+      "WireError": {
+        "description": "The flat, bidirectional wire form of a failed call. `detail` is structural\nJSON rather than the app's error type, so an older or newer client still\ngets `kind` and `message`.",
+        "properties": {
+          "detail": {
+            "default": null
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ErrorKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "TodoService",
+    "version": "0.1.0",
+    "x-generator": "gabion 0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/todo/complete": {
+      "post": {
+        "operationId": "todo_complete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Mark one todo done. Fails with `NotFound` when the id is unknown.",
+        "tags": [
+          "todo"
+        ]
+      }
+    },
+    "/todo/create": {
+      "post": {
+        "operationId": "todo_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTodo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Add one todo. Fails with `EmptyTitle` when the title is blank.",
+        "tags": [
+          "todo"
+        ]
+      }
+    },
+    "/todo/list": {
+      "post": {
+        "operationId": "todo_list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Todo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every todo, in the order they were created.",
+        "tags": [
+          "todo"
+        ]
+      }
+    }
+  }
+}

@@ -103,14 +103,16 @@ documentation.
 // features/todo/todo-api/src/lib.rs
 use gabion::prelude::*;
 
-#[derive(Serialize, Deserialize)]        // no JsonSchema: nothing emits a schema yet (GAPS §3)
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CreateTodo { pub title: String }
 
 // one error enum -> HTTP status and CLI exit code, through ErrorKind
 pub enum TodoError { NotFound, EmptyTitle, Internal }
 
-#[service]                   // generates the router and the clap subcommand
+#[service]                   // generates the router, the clap subcommand, and
+                             // the OpenAPI 3.1 document for both
 pub trait TodoService {                 // the trait IS the boundary:
+    /// Add one todo. Fails with `EmptyTitle` when the title is blank.
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoError>;
     async fn list(&self, q: ListQuery) -> Result<Vec<Todo>, TodoError>;
 }
@@ -140,9 +142,15 @@ claim checked against the repo (full list in docs/GAPS.md §3):
 | (default)  | wire types + `TodoServiceClient` trait + remote impl over `Http` | not built (GAPS §4) |
 | `inproc`   | `InProcess` client impl (direct call, zero serialization) | not built (GAPS §4) |
 | `server`   | axum routes                                 | built |
-| `server`   | OpenAPI 3.1 doc                             | not built (GAPS §3) |
+| `server` + `openapi` | OpenAPI 3.1 document for exactly those routes | built |
 | `mcp`      | rmcp tool definitions                       | not built (GAPS §4) |
 | `cli`      | clap subcommand mapping                     | built |
+
+The document is gated on the router feature on purpose: a contract cannot
+describe a route that is not served. It is built from the same types the handlers
+deserialize, and the method's doc comment becomes the operation's summary, so
+there is one source for the route, its shape, and its prose. The app commits the
+output and a test fails when the code and the committed document disagree.
 
 The renderer takes `Arc<dyn TodoService>` from its host and calls
 `client.create(input)`, so the signature, the types and the errors are the same

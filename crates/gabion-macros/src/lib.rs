@@ -22,22 +22,41 @@
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+
+mod cli;
+mod server;
+use cli::gen_cli;
+use server::gen_server;
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
 
 /// One method's worth of parsed info for the surface generators.
-struct Method {
-    ident: proc_macro2::Ident,
-    snake: proc_macro2::Ident,
-    input: Option<Type>, // None = unit input
+pub(crate) struct Method {
+    pub(crate) ident: proc_macro2::Ident,
+    pub(crate) snake: proc_macro2::Ident,
+    pub(crate) input: Option<Type>, // None = unit input
+    /// The `Ok` type of the declared `Result`, or the whole return type when the
+    /// method does not return a `Result`.
+    pub(crate) output: Type,
+    /// First line of the method's doc comment; empty when it has none.
+    pub(crate) summary: String,
+    /// The rest of the doc comment, empty when there is nothing beyond the first
+    /// line.
+    pub(crate) description: String,
+}
+
+/// The route a method is served on. One place computes it, so the router and the
+/// OpenAPI document cannot disagree about it.
+pub(crate) fn route(ns: &str, m: &Method) -> String {
+    format!("/{}/{}", ns, m.snake)
 }
 
 /// Everything the code generators need, precomputed from the trait.
-struct Contract {
+pub(crate) struct Contract {
     /// Trait name minus the `Service` suffix, snake_cased: `todo`.
-    ns: String,
-    trait_ident: proc_macro2::Ident,
-    trait_name: String,
-    methods: Vec<Method>,
+    pub(crate) ns: String,
+    pub(crate) trait_ident: proc_macro2::Ident,
+    pub(crate) trait_name: String,
+    pub(crate) methods: Vec<Method>,
 }
 
 #[proc_macro_attribute]
@@ -129,13 +148,65 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             }
         }
 
+        let (summary, description) = doc_summary(&m.attrs);
         methods.push(Method {
             ident: m.sig.ident.clone(),
             snake: format_ident!("{}", to_snake(&m.sig.ident.to_string())),
             input: input_ty,
+            output: ok_type(&m.sig.output),
+            summary,
+            description,
         });
     }
     Ok(methods)
+}
+
+/// Pull the `T` out of `Result<T, E>`; anything else is its own `T`.
+fn ok_type(output: &syn::ReturnType) -> Type {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return syn::parse_quote!(());
+    };
+    if let Type::Path(p) = &**ty {
+        if let Some(last) = p.path.segments.last() {
+            if last.ident == "Result" {
+                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                    if let Some(syn::GenericArgument::Type(ok)) = args.args.first() {
+                        return ok.clone();
+                    }
+                }
+            }
+        }
+    }
+    (**ty).clone()
+}
+
+/// The method's doc comment, split into a one-line summary and the rest. The
+/// OpenAPI document is generated from the same trait, so the prose a reviewer
+/// reads in the source is the prose a client reads in the contract.
+fn doc_summary(attrs: &[syn::Attribute]) -> (String, String) {
+    let mut lines: Vec<String> = Vec::new();
+    for attr in attrs {
+        if !attr.path().is_ident("doc") {
+            continue;
+        }
+        if let syn::Meta::NameValue(nv) = &attr.meta {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            {
+                lines.push(s.value().trim().to_string());
+            }
+        }
+    }
+    let lines: Vec<String> = lines.into_iter().filter(|l| !l.is_empty()).collect();
+    let Some((first, rest)) = lines.split_first() else {
+        return (String::new(), String::new());
+    };
+    if rest.is_empty() {
+        return (first.clone(), String::new());
+    }
+    (first.clone(), rest.join("\n"))
 }
 
 fn reject_retired_surface_attrs(m: &syn::TraitItemFn) -> syn::Result<()> {
@@ -151,178 +222,6 @@ fn reject_retired_surface_attrs(m: &syn::TraitItemFn) -> syn::Result<()> {
         }
     }
     Ok(())
-}
-
-/// axum router: one POST per method, error enum -> HTTP status.
-fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
-    let ns = &c.ns;
-    let trait_ident = &c.trait_ident;
-    let server_mod = format_ident!("__{}_server", ns);
-    let router_fn = format_ident!("{}_router", ns);
-    let exposed = &c.methods;
-
-    let handlers = exposed.iter().map(|m| {
-        let id = &m.ident;
-        let hid = format_ident!("__h_{}", m.snake);
-        let parse = match &m.input {
-            Some(ty) => quote! {
-                let input: #ty = match ::gabion::serde_json::from_slice(&body) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        // Same envelope as a service error, so a client parses
-                        // one shape for every failure.
-                        let wire = ::gabion::error::WireError::new(
-                            ::gabion::error::ErrorKind::InvalidInput,
-                            err.to_string(),
-                        );
-                        return (
-                            ::axum::http::StatusCode::BAD_REQUEST,
-                            ::axum::Json(wire),
-                        )
-                            .into_response()
-                    }
-                };
-            },
-            None => quote! { let input = (); let _ = body; },
-        };
-        quote! {
-            async fn #hid(
-                State(Svc(svc)): State<Svc>,
-                body: ::axum::body::Bytes,
-            ) -> ::axum::response::Response {
-                #parse
-                match svc.#id(input).await {
-                    Ok(v) => (::axum::http::StatusCode::OK, ::axum::Json(&v)).into_response(),
-                    Err(e) => {
-                        let status = ::axum::http::StatusCode::from_u16(e.kind.http_status())
-                            .unwrap_or(::axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-                        // A detail that will not serialize must not swallow the
-                        // error: send the kind and message, which is all a
-                        // client is guaranteed to understand anyway.
-                        let wire = ::gabion::error::WireError::from_service(&e)
-                            .unwrap_or_else(|_| {
-                                ::gabion::error::WireError::new(
-                                    ::gabion::error::ErrorKind::Internal,
-                                    "error detail failed to serialize",
-                                )
-                            });
-                        (status, ::axum::Json(wire)).into_response()
-                    }
-                }
-            }
-        }
-    });
-
-    let routes = exposed.iter().map(|m| {
-        let hid = format_ident!("__h_{}", m.snake);
-        let route = format!("/{}/{}", ns, m.snake);
-        quote! { .route(#route, ::axum::routing::post(#hid)) }
-    });
-
-    quote! {
-        #[doc(hidden)]
-        #[cfg(feature = "server")]
-        pub mod #server_mod {
-            #![allow(missing_docs, clippy::all, clippy::pedantic)]
-            use super::*;
-            use ::axum::extract::State;
-            use ::axum::response::IntoResponse;
-
-            #[derive(Clone)]
-            pub struct Svc(
-                pub ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
-            );
-
-            #(#handlers)*
-
-            /// One POST per method: `POST /<ns>.<method>`.
-            pub fn #router_fn(
-                svc: ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
-            ) -> ::axum::Router {
-                ::axum::Router::new()
-                    #(#routes)*
-                    .with_state(Svc(svc))
-            }
-        }
-    }
-}
-
-/// clap subcommand tree + async dispatch, error enum -> exit code.
-fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
-    let ns = &c.ns;
-    let trait_name = &c.trait_name;
-    let trait_ident = &c.trait_ident;
-    let cli_mod = format_ident!("__{}_cli", ns);
-    let cli_command_fn = format_ident!("{}_cli_command", ns);
-    let cli_dispatch_fn = format_ident!("{}_cli_dispatch", ns);
-    let exposed = &c.methods;
-
-    let subcommands = exposed.iter().map(|m| {
-        let name = m.snake.to_string();
-        match &m.input {
-            Some(_) => quote! {
-                ::clap::Command::new(#name).arg(
-                    ::clap::Arg::new("json").long("json").required(true)
-                        .help("method input as a JSON value"),
-                )
-            },
-            None => quote! { ::clap::Command::new(#name) },
-        }
-    });
-
-    let dispatch_arms = exposed.iter().map(|m| {
-        let name = m.snake.to_string();
-        let id = &m.ident;
-        let call = match &m.input {
-            Some(ty) => quote! {
-                {
-                    let raw = sm.get_one::<String>("json").cloned().unwrap_or_else(|| "null".into());
-                    let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
-                        ::gabion::cli::CliExit { code: 2, message: format!("bad --json: {e}") }
-                    })?;
-                    svc.#id(input).await
-                }
-            },
-            None => quote! { svc.#id(()).await },
-        };
-        quote! {
-            Some((#name, sm)) => #call
-                .map_err(|e| ::gabion::cli::CliExit {
-                    code: e.kind.exit_code(),
-                    message: e.message.clone(),
-                })
-                .and_then(|v| ::gabion::cli::render_json(&v)),
-        }
-    });
-
-    quote! {
-        #[doc(hidden)]
-        #[cfg(feature = "cli")]
-        pub mod #cli_mod {
-            #![allow(missing_docs, clippy::all, clippy::pedantic)]
-            use super::*;
-
-            /// clap subcommand tree for this service.
-            pub fn #cli_command_fn() -> ::clap::Command {
-                ::clap::Command::new(#ns).about(concat!("", stringify!(#trait_name), " operations"))
-                    .subcommands([#(#subcommands),*])
-            }
-
-            /// Dispatch a matched subcommand against the service.
-            pub async fn #cli_dispatch_fn(
-                svc: &(dyn #trait_ident + Send + Sync),
-                m: &::clap::ArgMatches,
-            ) -> ::core::result::Result<String, ::gabion::cli::CliExit> {
-                match m.subcommand() {
-                    #(#dispatch_arms)*
-                    _ => Err(::gabion::cli::CliExit {
-                        code: 2,
-                        message: format!("unknown subcommand for {}", #ns),
-                    }),
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

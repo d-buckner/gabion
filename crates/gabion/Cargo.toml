@@ -12,6 +12,7 @@ description = "Runtime-free core: capability traits, error model, client contrac
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 thiserror = { workspace = true }
 gabion-macros = { workspace = true }
 

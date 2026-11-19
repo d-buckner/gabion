@@ -9,11 +9,12 @@
 //! kind. Converting in-proc -> wire keeps the kind; converting back recovers the
 //! typed error when the client knows it.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Error kinds map 1:1 onto transport-level outcomes. Serialized by name, so
 /// the kind survives a round trip instead of being dropped at the boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     NotFound,
@@ -102,7 +103,7 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for ServiceError<
 /// The flat, bidirectional wire form of a failed call. `detail` is structural
 /// JSON rather than the app's error type, so an older or newer client still
 /// gets `kind` and `message`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WireError {
     pub kind: ErrorKind,
     pub message: String,

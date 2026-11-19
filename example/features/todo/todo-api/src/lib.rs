@@ -3,15 +3,15 @@
 
 use gabion::prelude::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CreateTodo {
     pub title: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TodoId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Todo {
     pub id: String,
     pub title: String,
@@ -20,7 +20,7 @@ pub struct Todo {
 }
 
 /// One error enum -> HTTP status, MCP error code, CLI exit code.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum TodoError {
     NotFound,
     EmptyTitle,
@@ -48,10 +48,13 @@ pub type TodoErr = ServiceError<TodoError>;
 /// An op that must not be remote does not belong in this trait.
 #[service]
 pub trait TodoService {
+    /// Add one todo. Fails with `EmptyTitle` when the title is blank.
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
 
+    /// Mark one todo done. Fails with `NotFound` when the id is unknown.
     async fn complete(&self, input: TodoId) -> Result<Todo, TodoErr>;
 
+    /// Every todo, in the order they were created.
     async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }
 
