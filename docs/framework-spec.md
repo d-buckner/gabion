@@ -103,13 +103,13 @@ documentation.
 // features/todo/todo-api/src/lib.rs
 use gabion::prelude::*;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]        // no JsonSchema: nothing emits a schema yet (GAPS §3)
 pub struct CreateTodo { pub title: String }
 
-#[derive(GabionError)]            // one error enum -> HTTP status, MCP error, CLI exit code
-pub enum TodoError { #[code(404)] NotFound }
+// one error enum -> HTTP status and CLI exit code, through ErrorKind
+pub enum TodoError { NotFound, EmptyTitle, Internal }
 
-#[service]                   // generates client, router, clap, mcp, openapi
+#[service]                   // generates the router and the clap subcommand
 pub trait TodoService {                 // the trait IS the boundary:
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoError>;
     async fn list(&self, q: ListQuery) -> Result<Vec<Todo>, TodoError>;
@@ -131,18 +131,23 @@ reachable operations: `gabion check` locks it in `.gabion/surfaces.lock` and
 fails when it drifts, so "this method is now callable by an agent" appears as a
 diff in the PR rather than in production.
 
-`#[service]` generates, feature-gated so each host compiles only what it needs:
+`#[service]` generates, feature-gated so each host compiles only what it needs.
+Four of the six rows are the design, not the build. The status column is the
+claim checked against the repo (full list in docs/GAPS.md §3):
 
-| Feature    | Generated artifact                          | Used by        |
-|------------|---------------------------------------------|----------------|
-| (default)  | wire types + `TodoServiceClient` trait + `Http` impl (fetch-based, wasm-safe) | render, web |
-| `inproc`   | `InProcess` client impl (direct call, zero serialization) | native host |
-| `server`   | axum routes + OpenAPI 3.1 doc               | server host    |
-| `mcp`      | rmcp tool definitions (schemas from JsonSchema) | server host  |
-| `cli`      | clap subcommand mapping                     | native host    |
+| Feature    | Generated artifact                          | Status |
+|------------|---------------------------------------------|--------|
+| (default)  | wire types + `TodoServiceClient` trait + remote impl over `Http` | not built (GAPS §4) |
+| `inproc`   | `InProcess` client impl (direct call, zero serialization) | not built (GAPS §4) |
+| `server`   | axum routes                                 | built |
+| `server`   | OpenAPI 3.1 doc                             | not built (GAPS §3) |
+| `mcp`      | rmcp tool definitions                       | not built (GAPS §4) |
+| `cli`      | clap subcommand mapping                     | built |
 
-The renderer calls `client.create(input)`. On native that's an in-process call;
-on web it's a POST to the server. Same signature, same types, same errors.
+The renderer takes `Arc<dyn TodoService>` from its host and calls
+`client.create(input)`, so the signature, the types and the errors are the same
+on every target. That call is in-process everywhere today: the generated client
+that would turn it into a POST from a wasm renderer is not built (GAPS §4).
 This is the Dioxus `#[server]` dual-codegen pattern, generalized to four
 surfaces and enforced by the crate wall.
 
@@ -203,12 +208,13 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | a `#[service]` trait declared outside `*-api` | `service-outside-api`: `#[service]` generates surfaces wherever it is written, so the lock scans every crate, and a trait in the wrong crate is named |
 | hand-written HTTP handler bypassing contract | arch-lint: `axum` importable only in generated modules + host main |
 | unwrap/expect/panic in core | `clippy::unwrap_used`, `expect_used`, `implicit_clone` deny |
-| unsafe anywhere outside effects | `unsafe_code = "forbid"` workspace-wide |
+| unsafe anywhere outside effects | `unsafe_code = "forbid"` in `[workspace.lints.rust]`, audited by `workspace-lints` |
+| a member that skips the workspace wall | `workspace-lints`: every member must carry `[lints] workspace = true`, or the block is inert for it |
 | over-broad visibility (`pub` past the wall) | cargo-mend-style visibility check in CI [not built] |
-| glob re-exports across the wall | clippy `wildcard_imports` deny on contract |
+| glob re-exports across the wall | `contract-glob`: a `pub use` whose tree contains a glob is a finding in any `*-api` crate. clippy's `wildcard_imports` is not the wall here: it does not lint `pub use` globs (measured on rust 1.99). |
 | code comments in service bodies (Dune's ban) | `no-comments-in-service-bodies` in `gabion check`: no comments inside `*-core` fn bodies; `///` docs on public items stay required (codegen needs them) |
 | silent default on a failed read/write | `core-silent-default`: `unwrap_or_default()` / `unwrap_or(..)` on a `Result` in `*-core` is a finding — a corrupt row must fail loudly, not vanish |
-| deleting the wall instead of fixing the code | `clippy-config`: `gabion check` audits `clippy.toml` itself; a removed ban or loosened threshold is a named finding |
+| deleting the wall instead of fixing the code | `clippy-config` and `workspace-lints`: `gabion check` audits `clippy.toml` and `[workspace.lints]` themselves; a removed ban, a loosened threshold, or a lowered lint level is a named finding |
 | `#[allow]` smuggled into a pure crate | `allow-allowlist`: `clippy::disallowed_*` allows are legal only in a declared effect home |
 
 Delivery (built): the gate is `gabion-cli`, run as `cargo run -p gabion-cli --

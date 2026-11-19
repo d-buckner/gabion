@@ -40,6 +40,11 @@ host = ["framework", "shared", "api", "core", "render"]
 framework = ["framework"]
 unclassified = []
 
+[workspace.lints.rust]
+# No unsafe anywhere in a gabion workspace, including the effect homes. Nothing
+# in the runtime needs it; a crate that does must say why in review.
+unsafe_code = "forbid"
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

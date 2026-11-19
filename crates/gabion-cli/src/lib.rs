@@ -19,6 +19,7 @@ pub mod report;
 pub mod source;
 pub mod steps;
 pub mod surfaces;
+pub mod workspace_lints;
 
 use std::path::PathBuf;
 
@@ -59,6 +60,7 @@ pub fn check(opts: &Options) -> Summary {
         "graph".to_string(),
         "edges".to_string(),
         "clippy.toml".to_string(),
+        "workspace lints".to_string(),
         "surfaces".to_string(),
         "sources".to_string(),
     ];
@@ -97,6 +99,7 @@ pub fn check(opts: &Options) -> Summary {
 
     let mut findings = edges::check(&graph, &cfg);
     findings.extend(clippy_cfg::check(&opts.root, &cfg));
+    findings.extend(workspace_lints::check(&opts.root, &graph, &cfg));
     findings.extend(surfaces::check(&graph, &opts.root, opts.update_surfaces));
     for krate in &graph.crates {
         findings.extend(lint::check_crate(krate, &cfg));

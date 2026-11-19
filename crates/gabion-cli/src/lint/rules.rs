@@ -146,6 +146,61 @@ pub(crate) fn host_logic_rule(krate: &Crate, path: &Path, file: &File) -> Vec<Fi
         .collect()
 }
 
+// --- contract crates name what they publish --------------------------------
+
+struct GlobReexport {
+    hits: Vec<(usize, String)>,
+}
+
+impl<'ast> Visit<'ast> for GlobReexport {
+    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        if matches!(node.vis, syn::Visibility::Public(_)) {
+            let rendered = render_use_tree(&node.tree);
+            if rendered.contains('*') {
+                self.hits.push((line_of(node.vis.span()), rendered));
+            }
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+}
+
+fn render_use_tree(tree: &syn::UseTree) -> String {
+    use syn::UseTree;
+    match tree {
+        UseTree::Path(p) => format!("{}::{}", p.ident, render_use_tree(&p.tree)),
+        UseTree::Name(n) => n.ident.to_string(),
+        UseTree::Rename(r) => format!("{} as {}", r.ident, r.rename),
+        UseTree::Glob(_) => "*".to_string(),
+        UseTree::Group(g) => {
+            let items: Vec<String> = g.items.iter().map(render_use_tree).collect();
+            format!("{{{}}}", items.join(", "))
+        }
+    }
+}
+
+/// A `pub use module::*` in a contract crate publishes whatever that module
+/// exports today and whatever it grows later. clippy's `wildcard_imports` does
+/// not lint `pub use` globs (measured on rust 1.99), so this is the only thing
+/// that sees it.
+pub(crate) fn contract_glob_rule(krate: &Crate, path: &Path, file: &File) -> Vec<Finding> {
+    if krate.class != Class::Api {
+        return Vec::new();
+    }
+    let mut v = GlobReexport { hits: Vec::new() };
+    visit::visit_file(&mut v, file);
+    v.hits
+        .into_iter()
+        .map(|(line, rendered)| {
+            Finding::new(
+                "contract-glob",
+                krate.at(path, line),
+                format!("`pub use {rendered}` publishes a whole module"),
+                "the contract is the list of names an outside caller may use; name them. A glob hands the wall to whatever the target module exports next.",
+            )
+        })
+        .collect()
+}
+
 // --- #[allow] placement audit ----------------------------------------------
 
 /// Lints gabion denies on purpose. Suppressing one is only legal where a rule
