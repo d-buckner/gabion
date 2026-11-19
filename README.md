@@ -1,144 +1,317 @@
 # gabion
 
-A civil-engineering-inspired Rust framework for single-binary apps: **one
-business core, four surfaces** (CLI, HTTP, MCP, typed client), natively and in
-the browser as wasm — with architectural shortcuts *mechanically sealed*.
+**A cross-platform Rust app framework with a wall built into it.**
 
-Named for [gabion walls](https://en.wikipedia.org/wiki/Gabion): cages of rocks
-that hold back a slope while letting water drain through. Slopes fail by
-taking shortcuts — so do codebases (the Grok-Bot-client lesson: agents take
-shortcuts, so the shortest path must be the correct path). Gabions don't rely
-on anyone remembering to maintain them; the geometry does the work. Here the
-geometry is the crate graph, compile targets, and lint gates — enforcement is
-mechanical, never a standard the author has to remember. The wall holds back
-the slope; the drains (api DTOs, trait objects) still flow.
+You write one business core. It runs natively, in the browser as WebAssembly
+(wasm), and on a server. gabion generates the surfaces from that core, and it
+refuses to build the shortcuts.
 
-Today two of the four surfaces are built (CLI, HTTP); MCP and the typed client
-are the next two. The gate that seals the walls is built, tested, and runs in
-CI.
+gabion is named for [gabion walls](https://en.wikipedia.org/wiki/Gabion): cages
+of rocks that hold back a slope while water drains through. A slope fails where
+it finds a shortcut. A codebase fails the same way. The cages never rely on
+someone remembering to maintain them. The geometry does the work. Here the
+geometry is the crate graph, the compile targets, and the static gates.
 
-## The two walls (both proven in this repo)
+## The problem: agents take the shortest path
 
-1. **Process wall** — `*-render` crates import `*-api` only. Importing `*-core`
-   is unrepresentable: it's not in `[dependencies]`, so `use todo_core::...`
-   fails with E0432. No lint can forget.
-2. **Feature wall** — feature A may depend on feature B's `*-api` only, never
-   B's internals. Cross-feature calls go through the generated client.
+"Slop" means code that satisfies the request in front of it and breaks a rule
+nobody restated in the prompt. An agent does not damage your architecture out of
+malice. It takes the shortest path that compiles. So the shortest path must be
+the correct path.
 
-And the effect ban: `*-core` is runtime-free and wasm-safe. `std::fs/net/thread`
-don't exist on wasm (compile fails); `std::time` *does* compile on wasm and
-panics at runtime, so `clippy::disallowed_types` deny (see `clippy.toml`) seals
-it — verified: injecting `SystemTime::now()` into todo-core fails `cargo clippy`
-with "use of a disallowed type".
+A style guide cannot enforce that. A reviewer cannot enforce it at the rate an
+agent produces code. Only a mechanical block works, and it has to be stricter
+than a linter, because the failure gabion targets is not a typo. It is a
+plausible shortcut that passes every standard check.
 
-## One trait, four surfaces
+gabion builds that block in three layers. Each layer catches what the layer above
+it cannot.
+
+## Layer 1: the crate graph makes the wrong import unrepresentable
+
+Every feature ships as three crates, not three modules:
+
+```
+features/todo/
+├── todo-api/       # wire types + the #[service] trait. Compiles everywhere.
+├── todo-core/      # the implementation. Pure. No tokio, no std::fs/net/time.
+└── todo-render/    # the UI. Depends on todo-api only.
+```
+
+Cargo only lets a crate `use` what is in its `[dependencies]`. So `todo-render`
+cannot import `todo-core`. The import does not exist. There is no rule to
+forget, no lint to disable, and no reviewer to catch it. The compiler says E0432.
+
+The same shape gives the second wall: feature A may depend on feature B's
+`*-api`, never on B's `*-core` or `*-render`. Cross-feature calls go through the
+generated client.
+
+DTOs live in `*-api`, not `*-core`. Put one in core and the render crate fails at
+the wall immediately. The error message is the documentation.
+
+## Layer 2: the compile target bans the effect
+
+`*-core` crates compile for `wasm32-unknown-unknown`. That target does the
+strictest work for free:
+
+- `std::fs`, `std::net`, and `std::thread` do not exist on wasm. The build fails.
+- `std::time`, `std::env`, and `std::process` **do** compile on wasm and trap at
+  runtime. The target cannot catch those. `clippy.toml` denies them through
+  `disallowed_types` and `disallowed_methods`, and gabion audits that list.
+
+Effects are not forbidden in the app. They move. Core code asks for a capability
+(`Clock`, `Store`), and the host injects a per-target implementation. A native
+host wires a real clock and a file store. A test wires a fixed clock and an
+in-memory store. Core code never sees the difference.
+
+## Layer 3: `gabion check` closes the rest, and audits itself
+
+Cargo's wall holds only while the dependency stays out of `[dependencies]`. One
+added line removes it. Clippy's wall holds only while `clippy.toml` keeps its
+bans. So the gate audits the configuration files, not just the source.
+
+```sh
+cargo run -p gabion-cli -- check     # one command, one exit code
+```
+
+Green means the architecture is correct. The gate runs the tools that already
+exist, then adds only the rules that need to know gabion's shape. It does not
+reimplement a linter.
+
+| Step | What it enforces |
+| --- | --- |
+| `fmt`, `clippy`, `test` | rustfmt. clippy with the effect ban, `unwrap_used` and `expect_used` deny, and complexity caps. The test suite. |
+| `shear`, `deny` | Unused dependencies. Licenses, advisories, and sources. |
+| `wasm` | Every `*-core` crate builds for `wasm32-unknown-unknown`. This is the wall proof, run per feature. |
+| `edges` | Every `Cargo.toml` against the edge table: process wall, feature wall, contract purity, no upward leak, no host dependency. |
+| `clippy.toml` | The required bans and thresholds are still present. A deleted wall is a named failure. |
+| `surfaces` | `.gabion/surfaces.lock` matches the set of reachable operations. Publishing a new one is a reviewable diff. |
+| `sources` | No comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs. |
+
+Two rules are the point of the whole design:
+
+- **`clippy-config`** fails the build when someone loosens a threshold or deletes
+  a ban instead of fixing the code. The wall cannot be negotiated away in a
+  one-line diff.
+- **`effect-home-allow`** fails the build when an `#[allow]` for a gabion-managed
+  lint appears outside a declared effect home. The escape hatch stays visible and
+  audited. One line in a named crate, not twelve scattered ones.
+
+Every rule has a failing fixture in `crates/gabion-cli/tests/`. The test
+`every_rule_bites` builds a workspace that violates one of everything and asserts
+each rule fires. `dogfood.rs` runs the static gate against this repo, so a wall
+that stops biting fails here first.
+
+## What a violation looks like
+
+Add `todo-core` to `todo-render` and run the gate:
+
+```text
+FAIL process-wall
+  at:     todo-render -> todo-core
+  what:   todo-render (render) may not depend on todo-core (core)
+  fix:    the render crate may name the service *trait* (from *-api) only; the
+          host injects the impl. Never depend on *-core.
+
+gabion check: 1 rule violation(s), 0 failing step(s)
+```
+
+Every finding carries a rule id, the location, and the correct fix rather than a
+suppression. An agent with zero context can satisfy the gate without reading
+this file.
+
+## The rulebook
+
+Each row names a shortcut and the block. The rule id is what the gate prints.
+
+| Shortcut | Block |
+| --- | --- |
+| A render crate imports a core crate | Crate graph, then `process-wall` |
+| Feature A imports feature B's internals | Crate graph, then `feature-wall` |
+| A hand-edited `Cargo.toml` sneaks a forbidden dependency | `edges` audit of every manifest |
+| `*-shared` depends on a feature (upward leak) | `upward-leak` |
+| A `*-api` crate depends on a core or render crate | `contract-purity` |
+| A host crate holds business logic | `host-business-logic` |
+| A workspace member gabion cannot classify | `unclassified-crate` |
+| `std::fs`, `std::net`, `std::thread` in `*-core` | The wasm build fails |
+| `std::time`, `std::env`, `std::process` in `*-core` | `disallowed_types` / `disallowed_methods` deny |
+| `unwrap()` or `expect()` | `unwrap_used`, `expect_used` deny |
+| `unwrap_or_default()` in `*-api` or `*-core` | `core-silent-default`. A serialization failure must not become an empty string. |
+| A comment inside a `*-core` function body | `no-comments-in-service-bodies`. Name the concept and extract it. |
+| A method added to a service trait without anyone reviewing it | `surface-snapshot`. The reachable set is locked; a new op is a diff. |
+| A `#[surface(..)]` or `#[internal]` left in a contract | The macro refuses to compile. Per-method surface attributes are gone. |
+| `#[allow]` smuggled into a pure crate | `allow-allowlist`, `effect-home-allow` |
+| A ban or threshold deleted from `clippy.toml` | `clippy-config` |
+| A long file, a deep function, a wide signature | `file-length` 400, `too-many-branches` 10, cognitive complexity 15, 80 lines, 6 arguments |
+| A `TODO`, `FIXME`, or `XXX` | `no-todo` |
+| Unused dependencies, bad licenses, advisories | `cargo shear`, `cargo deny` |
+
+## One core, every surface
+
+The design constraint on the product side: you declare a service once, and every
+surface comes from that declaration. No hand-written handler drifts from the
+contract.
+
+**The trait is the boundary.** Every method in a `#[service]` trait is generated
+into every surface, with no per-method opt-in or opt-out. There is no attribute
+to forget and no argument list for the macro to quietly ignore.
 
 ```rust
-// The trait IS the boundary. Every method in it is generated into every
-// surface — CLI subcommand, HTTP route, MCP tool, typed-client method — with
-// no per-method opt-in or opt-out.
+// features/todo/todo-api/src/lib.rs
+use gabion::prelude::*;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTodo { pub title: String }
+
+pub type TodoErr = ServiceError<TodoError>;
+
 #[service]
 pub trait TodoService {
     async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
     async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }
 
-// An op that must not be remote is not in this trait. Plain trait in the same
-// api crate: another feature can call it in-proc, no surface can reach it.
+// An op that must not be remote is not in this trait. A plain trait here: another
+// feature can call it in-process, no surface can reach it.
+#[async_trait]
 pub trait TodoInternals {
     async fn recompute_stats(&self) -> Result<(), TodoErr>;
 }
 
-// And purely-local internals skip the api crate entirely — inherent methods on
-// the impl. Adapters only hold `Arc<dyn TodoService>`, so they cannot see them.
+// And purely-local internals skip the api crate entirely: inherent methods on
+// the impl in todo-core. Adapters hold Arc<dyn TodoService>, so they cannot see
+// them. Structure, not lint.
 ```
 
-There are no surface attributes because there is nothing to configure: the
-shortest path is the correct path, and the reviewable artifact is the *set* of
-reachable ops, locked in `.gabion/surfaces.lock` so publishing a new one shows
-up as a diff in the PR.
+Because there is no annotation to review, the reviewable artifact is the *set*:
+`gabion check` locks every reachable operation in `.gabion/surfaces.lock`, so
+adding a method fails the build until you run `--update-surfaces` and commit it.
+Under this framework's own premise — agents take the shortest path — publishing a
+new callable op should never be a silent event.
 
-`#[service]` generates (feature-gated): an axum router (`POST /todo/create`),
-clap subcommands (`myapp todo create --json '{...}'`), an OpenAPI-ready envelope,
-and (v2: rmcp tools + typed client). One error enum maps to HTTP status, MCP
-error code, and CLI exit code — one mapping, everywhere.
+`#[service]` generates, behind cargo features, so each host compiles only what
+it needs:
 
-## The gate
+| Feature | Generated artifact | Status |
+| --- | --- | --- |
+| `cli` | A clap subcommand tree and async dispatch. Errors map to exit codes. | built |
+| `server` | An axum router, one POST per exposed method. Errors map to HTTP status. | built |
+| `mcp` | rmcp tool definitions | not built |
+| (default) | A typed client for the render crate | not built |
+
+One error enum maps to an HTTP status, an MCP error code, and a CLI exit code.
+`ErrorKind::NotFound` gives 404, -32001, and exit 3 from one match arm in
+`crates/gabion/src/error.rs`. No adapter hand-maps anything. The kind survives
+the boundary: the wire carries a flat `WireError` that a client can deserialize
+and, if it knows the app's error enum, turn back into the typed error.
+
+The renderer calls the same trait. Natively that is an in-process call. In the
+browser it is an HTTP call. Same signature, same types, same errors.
+
+## Quick start
+
+Rust comes from rustup. `rust-toolchain.toml` pins stable and adds the wasm
+target, clippy, and rustfmt automatically.
 
 ```sh
-cargo run -p gabion-cli -- check     # one command, one exit code
+# The server host: builds with no system packages.
+cargo build -p host-server
+./target/debug/myapp-server          # listening on http://127.0.0.1:3456
+
+curl -X POST localhost:3456/todo/create -d '{"title":"buy sandspice"}'
+curl -X POST localhost:3456/todo/list
+
+# The wall proof: business logic compiles for the browser.
+cargo build -p todo-core --target wasm32-unknown-unknown
+
+# The gate. Static rules only, no subprocesses.
+cargo run -p gabion-cli -- check --fast
 ```
 
-Green means the architecture is correct. The gate orchestrates the standard
-tools and adds only the rules that need to know gabion's shape — it does not
-reimplement a linter:
+The native host adds a CLI and a desktop UI:
 
-| step | what it enforces |
-|---|---|
-| `fmt` `clippy` `test` | rustfmt; clippy with the effect ban and complexity caps; the test suite |
-| `shear` `deny` | unused dependencies; licenses, advisories, sources |
-| `wasm` | every `*-core` crate builds for `wasm32-unknown-unknown` |
-| `edges` | the dependency edge table — process wall, feature wall, contract purity, no upward leaks |
-| `clippy.toml` | the ban list and thresholds are still present; a deleted wall is a named failure |
-| `surfaces` | `.gabion/surfaces.lock` matches the set of reachable ops — publishing a new one is a reviewable diff |
-| `sources` | no comments in `*-core` bodies, no silent defaults, hosts stay composition roots, `#[allow]` only where declared, branch and file caps, no TODOs |
-
-The edge table is data, not code — an app tunes it in `Cargo.toml`:
-
-```toml
-[workspace.metadata.gabion.edges]
-render = ["framework", "shared", "api"]   # render may never reach core
+```sh
+cargo build -p host-native           # needs pkg-config and GTK dev files
+export MYAPP_STORE=/tmp/s.json       # default: ./myapp.store.json
+./target/debug/myapp todo create --json '{"title":"buy sandspice"}'
+./target/debug/myapp todo list
+./target/debug/myapp ui              # the render crate, in-process
+./target/debug/myapp gui             # a Dioxus desktop window
 ```
 
-Crates that legitimately perform effects (a native host, a `*-native` adapter,
-the CLI itself) are declared in `[workspace.metadata.gabion] effect-homes`, and
-the `#![allow(clippy::disallowed_*)]` that grants them is audited: an `#[allow]`
-outside a declared effect home is itself a finding.
-
-Every rule has a failing fixture in `crates/gabion-cli/tests/`, and
-`dogfood.rs` runs the gate against this repo — a wall that stops biting fails
-here first.
+The full gate also runs `cargo shear` and `cargo deny`. Install them with
+`cargo install cargo-shear cargo-deny`, or pass `--no-external` to skip them.
 
 ## Layout
 
 ```
-crates/gabion/          runtime: capability traits, error model, testing caps
+crates/gabion/          runtime: capability traits, error model, test caps
 crates/gabion-macros/   #[service]
 crates/gabion-native/   native caps: SystemClock, FileStore (a declared effect home)
-crates/gabion-cli/      `gabion check`: the gate
+crates/gabion-cli/      gabion check: the gate
 example/features/todo/  todo-api | todo-core | todo-render  (the colocation unit)
-example/hosts/          host-native (CLI+ui) | host-server (axum) | host-web (wasm)
+example/hosts/          host-native (CLI + UI) | host-server (axum) | host-web (wasm)
+docs/                   the spec, the inspection log, the collab proposal
 ```
 
-## Try it
+## Tuning the wall for your app
 
-```sh
-cargo build
-export MYAPP_STORE=/tmp/s.json                       # default: ./myapp.store.json
-./target/debug/myapp todo create --json '{"title":"buy sandspice"}'
-./target/debug/myapp todo list
-./target/debug/myapp ui                              # render crate, in-process
-./target/debug/myapp-server                          # POST http://localhost:3456/todo/create
-cargo build -p todo-core --target wasm32-unknown-unknown   # the wall proof
-cargo run -p gabion-cli -- check                          # the whole gate
+The edge table is data, not code. An app widens or tightens its own walls in
+`Cargo.toml` without patching the framework:
+
+```toml
+[workspace.metadata.gabion]
+effect-homes = ["myapp-cli"]     # crates allowed to perform effects
+max-file-lines = 400
+max-branches = 10
+
+[workspace.metadata.gabion.edges]
+render = ["framework", "shared", "api"]   # render may never reach core
 ```
+
+Gabion classifies a crate from its name and path, never from a hand-written
+label. A name must end in `-api`, `-core`, `-render`, or `-shared`, start with
+`host-` or end with `-host`, sit under a `hosts/` directory, or appear in
+`framework-crates`. Anything else is an `unclassified-crate` finding, because an
+unclassified crate slips past the whole edge table.
+
+The required bans and clippy thresholds work the other way. An app may tighten
+them through `max-thresholds`. The gate only ever tightens them.
 
 ## Status
 
-v0.1 skeleton, working end to end. The todo example runs as a native binary
-(CLI, file-backed store) and as an HTTP server, and `todo-core` compiles clean
-to `wasm32-unknown-unknown`. `host-web` compiles for wasm but has no bundler
-config yet, so treat it as compile-proof, not a shipped browser app.
+v0.1. The example runs end to end today: the todo feature works as a native
+binary with a file-backed store and as an HTTP server, `todo-core` compiles clean
+to wasm, and the gate passes on this repo.
 
-**Built:** `#[service]` codegen (clap + axum), the capability model (`Clock`,
-`Store`, `Random`) with native and deterministic test impls, an error model that
-survives the wire (`WireError`), `gabion check` with tests proving each rule
-bites, CI, and the effect ban across threads / env / process / fs / net.
+**Built:** the three-crate feature shape, the edge-table audit, `#[service]` codegen
+for clap and axum, the capability model (`Clock`, `Store`, `Random`) with native
+and deterministic test impls, an error model that survives the wire (`WireError`),
+the effect ban across time, env, process, fs, net, and threads, `gabion check`
+with a failing fixture per rule, and CI for GitHub Actions.
 
-**Not built yet:** the MCP surface, the generated typed client, `gabion new`
-scaffolding, and per-call `Ctx` (so authorization is currently unrepresentable).
-See [docs/GAPS.md](docs/GAPS.md) for the full inspection log — including the
-places a wall is claimed but not yet enforced — and `docs/framework-spec.md` for
-the signed-off decisions behind each.
+**Not built:** the MCP surface, the generated typed client, `gabion new`
+scaffolding, per-call `Ctx` (so caller identity and authorization are not
+representable yet), OpenAPI export, and the conformance suite that drives one
+impl through every adapter.
 
-MIT or Apache-2.0 dual licensed.
+**Claimed but not enforced yet:** `unsafe_code = "forbid"` is not set anywhere, so
+the spec claims a block that does not exist. The surface lock records method
+names, not input types, so a method that keeps its name and changes its input
+shape drifts silently. And no CI run has ever executed: the GitHub Actions
+workflow is configured and the Forgejo one is valid, but no runner is registered,
+so the gate is enforced locally and by review, not by the server.
+
+[docs/GAPS.md](docs/GAPS.md) is the full inspection log, ordered by how much
+damage each silence does. The house rule there: a gap closes when a failing test
+exists for it, not when the code looks better.
+
+## Docs
+
+- [docs/framework-spec.md](docs/framework-spec.md) — the signed-off decisions
+  behind each wall, and the shortcuts each one seals.
+- [docs/GAPS.md](docs/GAPS.md) — what the walls do not yet hold.
+- [docs/local-first-collab.md](docs/local-first-collab.md) — a design proposal
+  for optional local-first sync (rooms, presence, CRDT merge). Not implemented.
+
+MIT licensed. See [LICENSE](LICENSE).

@@ -243,7 +243,7 @@ Two deliberate deviations from the original plan:
 
 ```
 gabion/         # runtime: prelude, client traits, error model, capability traits
-gabion-macros/  # #[service], #[surface], #[GabionError]
+gabion-macros/  # #[service] (#[GabionError] derive is not built yet)
 gabion-native/  # native caps: SystemClock, FileStore (a declared effect home)
 gabion-cli/     # `gabion check` (built); `gabion new`, `gabion dev` (not yet)
 gabion-codegen/ # openapi export, contract snapshot (reviewable generated diff) [not built]
