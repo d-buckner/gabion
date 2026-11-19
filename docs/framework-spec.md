@@ -158,7 +158,9 @@ pub trait Caps: Clone + Send + Sync + 'static {
     type Clock: Clock;    // fn now(&self) -> Timestamp (whole seconds, on purpose)
     type Store: Store;    // async key-value of JSON strings
     type Random: Random;  // fn next_u64(&self) -> u64; ids need entropy, not luck
-    // Sleep, Http — see docs/GAPS.md §2
+    type Sleep: Sleep;    // fn sleep(&self, ms) -> Timer; fn timer(&self, ms) -> Timer
+    type Http: Http;      // fn send(&self, HttpRequest) -> Result<HttpResponse, HttpError>
+    // fn sleep(&self) -> &Self::Sleep; fn http(&self) -> &Self::Http;
 }
 
 pub struct TodoServiceImpl<C: Caps> { caps: C }
@@ -168,13 +170,15 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> { /* business logic */ }
 - Core is `async` but runtime-free: it returns futures; hosts drive them
   (tokio native, JS event loop on wasm). No tokio dependency in core.
 - Native host wires `NativeCaps` / `FileCaps` (`SystemClock`, in-memory or
-  file store, `SystemRandom` over getrandom).
-- Tests wire `TestCaps`: frozen clock, in-memory store, deterministic
-  `MockRandom` — which is what makes id-dependent behaviour reproducible rather
-  than flaky.
-- Web host wires `WasmCaps` (mock clock/store/random). It exists to prove the
-  wall compiles for wasm; the real `WebCaps` (js Date, IndexedDB, js crypto)
-  lands with the thin-client pass.
+  file store, `SystemRandom` over getrandom, `TokioSleep`, `ReqwestHttp`).
+- Tests wire `TestCaps`: a virtual clock that moves only when code waits,
+  in-memory store, deterministic `MockRandom` — which is what makes
+  id-dependent behaviour reproducible rather than flaky — `MockSleep`, and
+  `MockHttp` with scripted routes. `gabion::caps::timeout` bounds a wait on
+  whichever clock the capability carries.
+- Web host wires `WasmCaps` (mock clock/store/random/sleep/http). It exists to
+  prove the wall compiles for wasm; the real `WebCaps` (js Date, IndexedDB, js
+  crypto, `fetch`) lands with the thin-client pass.
 - Storage v1: abstract `Store` trait; `FileStore` is the shipped native impl
   (pure Rust, no C deps keeps the single-binary promise). redb/sqlx left to the
   app.

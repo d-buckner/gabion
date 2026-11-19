@@ -30,15 +30,13 @@ All four are closed with fixtures, and recorded in §7.
 
 ## 2. Missing capabilities
 
-`crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Random`, `Caps`. Not
-defined:
+Nothing open. `crates/gabion/src/caps.rs` now defines `Clock`, `Store`, `Random`,
+`Sleep`, `Http`, the `timeout` combinator, and `Caps`. Both entries that were
+here are closed with tests and recorded in §7.
 
-- **`Sleep` / `Timeout`** — no testable way to express waiting, so any retry or
-  debounce logic would have to fake it.
-- **`Http`** — a core cannot call another service, so the feature wall's
-  "cross-feature calls go through the generated client" has no capability to
-  travel on. This is also what the wasm thin-client posture (spec §10.3) needs
-  before it can exist.
+What this does not deliver: the generated typed client still does not exist (§4),
+so no generated code travels on `Http` yet. The capability is proven against a
+real server and a real route, not against a client that is not built.
 
 ## 3. Claims ahead of code
 
@@ -80,6 +78,11 @@ browser is a thin client over HTTP (spec §10), which is also not built.
 - `deny.toml`: `allow-workspace` / `allow-wildcard-paths`, with `publish = false`
   on every member. Workspace path deps have no version requirement; Cargo.lock
   is what pins them. A `"*"` from crates.io still fails.
+- `deny.toml`: `CDLA-Permissive-2.0` is an allowed license. One crate uses it:
+  `webpki-roots`, the bundled Mozilla root-certificate set the native `Http`
+  capability trusts. It is a data license, not a code license. The alternative is
+  `rustls-tls-native-roots`, which reads the host's trust store and breaks the
+  single-binary promise the http client exists to keep.
 - `[package.metadata.cargo-shear] ignored = ["serde", "axum", "bytes", "clap"]`
   in `todo-api`: those are used only inside `#[service]`-generated code, which
   cargo-shear cannot see. The tool's own escape hatch, not a deleted wall.
@@ -145,6 +148,40 @@ browser is a thin client over HTTP (spec §10), which is also not built.
   failure. Proven by `a_workspace_with_no_members_is_a_failure`. The same run now
   uses `cargo test --all-features`, so a feature-gated test target cannot be
   skipped into a vacuous green.
+
+- **There was no way to express waiting.** Core code had no timer: `std::thread::sleep`
+  blocks a worker and does not exist on wasm, so retry or debounce logic had to be
+  faked in every test that touched it. `Caps::sleep` is a `Sleep` capability with
+  two methods: `sleep(millis)` to wait, and `timer(millis)` to bound a wait. A
+  deadline is a separate method because a timer that advances a virtual clock
+  would fire every timeout the moment it was polled. `gabion::caps::timeout` races
+  a future against that timer.
+  Native: `TokioSleep` over `tokio::time`. Tests: `MockSleep` over a `MockTime`
+  virtual clock shared with `MockClock`, which moves only when code asks to wait.
+  Proven by `a_wait_moves_the_virtual_clock_and_costs_no_wall_time`,
+  `timeout_cuts_off_a_wait_that_runs_past_the_deadline` and
+  `timeout_keeps_a_result_that_arrives_first` in `crates/gabion/tests/capabilities.rs`,
+  and by the same two timeout tests in `crates/gabion-native/tests/sleep.rs`, run
+  against the real tokio timer on its paused clock.
+  Deliberate limit: under the test clock a timeout only fires if the awaited code
+  sleeps past the deadline, because virtual time moves only on a wait. That is the
+  rule tokio's own virtual time follows, and it is documented at `timeout`.
+- **A core could not call another service.** The feature wall says cross-feature
+  calls go through the generated client, and there was no capability for that call
+  to travel on. `Caps::http` is an `Http` trait over `HttpRequest`, `HttpResponse`
+  and `HttpError`: a method, a URL, headers, bytes. Native: `ReqwestHttp` with
+  rustls, so the single-binary promise holds and no system openssl is needed.
+  Tests: `MockHttp` replays scripted routes and records what was sent; a call
+  nobody scripted is an error rather than an empty 200. A non-2xx status is a
+  response, not a transport error, so the caller picks the `ErrorKind`.
+  Proven by `a_core_call_over_http_reaches_the_generated_route` and
+  `a_missing_route_comes_back_as_a_status_the_caller_can_read`, which call generic
+  `Caps` code over a real socket against the generated axum router, and by
+  `mock_http_replays_the_script_and_records_the_request`.
+  Deviation from the plan in §2's wording: `Timeout` is a combinator over `Sleep`,
+  not a sixth capability. A deadline needs the same clock as the wait it bounds,
+  and two capabilities that must agree on one clock is one capability with a
+  second method.
 
 - The two gate rules that used to police this (`surface-completeness`,
   `surface-unknown`) were deleted, and replaced by `surface-snapshot`: the

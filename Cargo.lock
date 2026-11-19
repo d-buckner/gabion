@@ -1853,6 +1853,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -1882,7 +1883,9 @@ version = "0.1.0"
 dependencies = [
  "gabion",
  "getrandom 0.3.4",
+ "reqwest",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2325,7 +2328,9 @@ name = "host-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "gabion",
  "gabion-native",
+ "serde_json",
  "todo-api",
  "todo-core",
  "tokio",

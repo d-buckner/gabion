@@ -4,7 +4,7 @@
 //! `cargo build -p host-web --target wasm32-unknown-unknown` must pass.
 
 use gabion::caps::{Caps, Timestamp};
-use gabion::testing::{InMemoryStore, MockClock, MockRandom};
+use gabion::testing::{InMemoryStore, MockClock, MockHttp, MockRandom, MockSleep};
 use std::sync::Arc;
 use todo_api::TodoService;
 use todo_core::TodoServiceImpl;
@@ -15,12 +15,16 @@ pub struct WasmCaps {
     clock: MockClock,
     store: InMemoryStore,
     random: MockRandom,
+    sleep: MockSleep,
+    http: MockHttp,
 }
 
 impl Caps for WasmCaps {
     type Clock = MockClock;
     type Store = InMemoryStore;
     type Random = MockRandom;
+    type Sleep = MockSleep;
+    type Http = MockHttp;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -29,6 +33,12 @@ impl Caps for WasmCaps {
     }
     fn random(&self) -> &Self::Random {
         &self.random
+    }
+    fn sleep(&self) -> &Self::Sleep {
+        &self.sleep
+    }
+    fn http(&self) -> &Self::Http {
+        &self.http
     }
 }
 
@@ -43,12 +53,15 @@ pub fn start() {
 }
 
 fn wasm_caps() -> WasmCaps {
+    let clock = MockClock::new(Timestamp(0));
     WasmCaps {
-        clock: MockClock(Timestamp(0)),
+        sleep: MockSleep::new(clock.time().clone()),
+        http: MockHttp::default(),
         store: InMemoryStore::default(),
         // Deterministic on purpose: this host is a wall proof, not a browser
         // app. A js-crypto impl lands with the WebCaps pass.
         random: MockRandom::new(0xA570_A570),
+        clock,
     }
 }
 
