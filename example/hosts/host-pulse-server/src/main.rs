@@ -13,7 +13,7 @@
 async fn main() {
     if std::env::args().any(|a| a == "--mcp-stdio") {
         let server = host_pulse_server::mcp();
-        if let Err(e) = gabion_native::mcp_stdio::serve_stdio(&server) {
+        if let Err(e) = gabion_native::mcp_stdio::serve_stdio(server) {
             eprintln!("mcp stdio: {e}");
             std::process::exit(1);
         }

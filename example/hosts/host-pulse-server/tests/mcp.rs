@@ -6,7 +6,21 @@
 //! tool list a browser cannot reproduce.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::io::Cursor;
+use std::io::{Cursor, Write};
+use std::sync::{Arc, Mutex};
+
+/// A buffer the pump's tasks can own a clone of.
+struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+impl Write for SharedBuf {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 use gabion::caps::{Http, HttpRequest};
 use serde_json::{json, Value};
@@ -125,10 +139,13 @@ fn the_stdio_transport_answers_the_same_server() {
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n",
     );
-    let mut output = Vec::new();
-    gabion_native::mcp_stdio::pump(Cursor::new(input), &mut output, &server).unwrap();
+    // The pump dispatches concurrently, so the writer is shared with the tasks it
+    // spawns rather than borrowed.
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let writer = SharedBuf(output.clone());
+    gabion_native::mcp_stdio::pump(Cursor::new(input), writer, server).unwrap();
 
-    let text = String::from_utf8(output).unwrap();
+    let text = String::from_utf8(output.lock().unwrap().clone()).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
         lines.len(),
