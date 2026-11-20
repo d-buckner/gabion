@@ -37,12 +37,32 @@ impl Crate {
         )
     }
 
+    /// `src/` only: the code that ships, and where every structural rule applies.
     #[must_use]
     pub fn source_files(&self) -> Vec<PathBuf> {
-        let src = self.dir.join("src");
         let mut out = Vec::new();
-        collect_rs(&src, &mut out);
+        collect_rs(&self.dir.join("src"), &mut out);
         out.sort();
+        out
+    }
+
+    /// `tests/` and `examples/`: shipped nowhere, scanned by the subset of rules
+    /// in `lint::check_test_files`.
+    #[must_use]
+    pub fn test_files(&self) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for dir in ["tests", "examples"] {
+            collect_rs(&self.dir.join(dir), &mut out);
+        }
+        out.sort();
+        out
+    }
+
+    /// Both, for a rule that asks "does any crate name this?".
+    #[must_use]
+    pub fn source_files_all(&self) -> Vec<PathBuf> {
+        let mut out = self.source_files();
+        out.extend(self.test_files());
         out
     }
 }

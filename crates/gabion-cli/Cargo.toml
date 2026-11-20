@@ -23,6 +23,9 @@ toml = "0.8"
 # rustc tokenizer, so comments/strings/lifetimes are told apart exactly.
 proc-macro2 = { workspace = true, features = ["span-locations"] }
 syn = { workspace = true, features = ["visit"] }
+# Rendering a signature for the lock hash: `TokenStream::to_string()` is stable
+# and carries no spans, unlike Debug.
+quote = { workspace = true }
 rustc_lexer = "0.1"
 
 [dev-dependencies]

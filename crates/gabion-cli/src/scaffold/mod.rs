@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use crate::config::Config;
 
 use walls::svc_name;
-pub use walls::{add_lock_entries, add_members, clippy_toml, lock_entries, workspace_lints};
+pub use walls::{add_members, clippy_toml, workspace_lints};
 
 /// Files to write, keyed by path relative to the workspace root.
 pub struct Scaffold {
@@ -162,20 +162,7 @@ pub fn app(name: &str, gabion_path: &Path, cfg: &Config) -> Scaffold {
         fill(templates::hosts::NATIVE_MAIN),
     );
 
-    // The lock is written with the scaffold's own operations, so a fresh app
-    // passes `surface-snapshot` before anyone runs `--update-surfaces`: the lock
-    // exists to make publishing an op a diff, not to make the first run fail.
-    scaffold.add(".gabion/surfaces.lock", surface_lock(name, feature, &svc));
     scaffold
-}
-
-fn surface_lock(name: &str, feature: &str, svc: &str) -> String {
-    format!(
-        "# gabion public surface. Every line is reachable over CLI, HTTP,\n\
-         # MCP and the typed client. Review changes here like an API change.\n\
-         {name}-{feature}-api::{svc}Service::create\n\
-         {name}-{feature}-api::{svc}Service::list\n"
-    )
 }
 
 /// The three crates of one more feature, for `gabion feature add`.
@@ -271,48 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn the_scaffolded_lock_is_the_operations_the_scaffold_publishes() {
-        let app = app("demo", Path::new("/framework"), &Config::default());
-        let lock = app
-            .files
-            .get(Path::new(".gabion/surfaces.lock"))
-            .expect("the scaffold writes a lock");
-        assert!(lock.contains("demo-todo-api::TodoService::create"));
-        assert!(lock.contains("demo-todo-api::TodoService::list"));
-    }
-
-    #[test]
     fn members_are_added_without_losing_the_rest_of_the_manifest() {
         let manifest = "[workspace]\nresolver = \"2\"\nmembers = [\n    \"a\",\n]\n\n# keep me\n[workspace.package]\nversion = \"0.1.0\"\n";
         let out = add_members(manifest, &["b".to_string()]).expect("members added");
         let parsed: toml::Value = out.parse().expect("still parses");
         assert_eq!(parsed["workspace"]["members"].as_array().unwrap().len(), 2);
         assert!(out.contains("# keep me"), "the edit ate a comment");
-    }
-
-    #[test]
-    fn new_lock_entries_merge_without_losing_the_ones_already_there() {
-        let lock =
-            "# header\n#\ndemo-todo-api::TodoService::create\ndemo-todo-api::TodoService::list\n";
-        let merged = add_lock_entries(lock, &lock_entries("demo", "billing"));
-        let ops: Vec<&str> = merged
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.is_empty())
-            .collect();
-        assert_eq!(ops.len(), 4);
-        assert_eq!(ops[0], "demo-billing-api::BillingService::create", "sorted");
-        assert!(
-            merged.starts_with("# header"),
-            "the header survived: {merged}"
-        );
-    }
-
-    #[test]
-    fn merging_the_same_operation_twice_does_not_duplicate_it() {
-        let entries = lock_entries("demo", "billing");
-        let once = add_lock_entries("", &entries);
-        let twice = add_lock_entries(&once, &entries);
-        assert_eq!(once, twice);
     }
 
     #[test]

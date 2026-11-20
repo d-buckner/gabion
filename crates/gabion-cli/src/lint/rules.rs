@@ -262,11 +262,16 @@ pub(crate) fn allow_audit(
 }
 
 fn granted(krate: &Crate, name: &str, line: usize, regions: &Regions) -> bool {
+    // An integration test is an effect home by construction: it runs on the
+    // developer's machine and ships nowhere, so a test that writes a fixture file
+    // is doing the thing tests do. The grant is scoped to the file, and the rule
+    // still audits every shipped source.
+    let in_test_region = regions.covers(&regions.test, line);
     match name {
-        "clippy::disallowed_types" | "clippy::disallowed_methods" => krate.is_effect_home,
-        "clippy::unwrap_used" | "clippy::expect_used" => {
-            krate.is_effect_home || regions.covers(&regions.test, line)
+        "clippy::disallowed_types" | "clippy::disallowed_methods" => {
+            krate.is_effect_home || in_test_region
         }
+        "clippy::unwrap_used" | "clippy::expect_used" => krate.is_effect_home || in_test_region,
         "clippy::all" | "clippy::pedantic" | "missing_docs" => {
             regions.covers(&regions.generated, line)
         }
@@ -276,7 +281,7 @@ fn granted(krate: &Crate, name: &str, line: usize, regions: &Regions) -> bool {
 
 fn suppression_fix(name: &str) -> &'static str {
     if name.starts_with("clippy::disallowed_") {
-        "the effect ban is global on purpose. Only a declared effect home (*-native, a host, or [workspace.metadata.gabion] effect-homes) may lift it."
+        "the effect ban is global on purpose. Only a declared effect home (*-native, a host, a test region, or [workspace.metadata.gabion] effect-homes) may lift it."
     } else if name == "clippy::unwrap_used" || name == "clippy::expect_used" {
         "unwrap is allowed in hosts, effect homes, and #[cfg(test)] modules only. Return the error, or move the code to a host."
     } else {

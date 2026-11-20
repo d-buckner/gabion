@@ -91,24 +91,44 @@ impl Step {
     }
 }
 
+/// Why a step did not pass.
+///
+/// A tool that is not installed and a tool that ran and failed are different
+/// facts, and reporting the first as the second is how a missing licence audit
+/// looks like a broken build (§8). The caller decides what a missing tool means —
+/// `--allow-missing-tools` turns it into a named skip, and silence is not an
+/// option in either case.
+pub enum StepFailure {
+    /// The program could not be started at all.
+    Missing { tool: String, install: &'static str },
+    /// It ran and did not succeed.
+    Failed(String),
+}
+
 /// Run one step; `Ok(())` means green. Output is inherited so failures show
 /// the tool's own diagnostics.
-pub fn run(step: &Step, root: &Path) -> Result<(), String> {
+pub fn run(step: &Step, root: &Path) -> Result<(), StepFailure> {
     let status = Command::new(step.program)
         .args(&step.args)
         .current_dir(root)
         .status();
     match status {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!(
+        Ok(s) => Err(StepFailure::Failed(format!(
             "`{} {}` exited {}",
             step.program,
             step.args.join(" "),
             s
-        )),
-        Err(e) => {
-            let hint = step.install.unwrap_or("tool not found");
-            Err(format!("cannot run `{}`: {} ({})", step.program, e, hint))
-        }
+        ))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StepFailure::Missing {
+            tool: format!("{} {}", step.program, step.args.join(" ")),
+            install: step
+                .install
+                .unwrap_or("install it, or pass --allow-missing-tools"),
+        }),
+        Err(e) => Err(StepFailure::Failed(format!(
+            "cannot run `{}`: {e}",
+            step.program
+        ))),
     }
 }

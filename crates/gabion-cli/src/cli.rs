@@ -83,22 +83,8 @@ impl Args {
         let mut opts = Options::new(current_dir());
         let mut i = 0;
         while i < rest.len() {
-            match rest[i].as_str() {
-                "--fast" => opts.fast = true,
-                "--no-external" => opts.no_external = true,
-                "--update-surfaces" => opts.update_surfaces = true,
-                "--target" => {
-                    i += 1;
-                    let target = rest.get(i).ok_or("--target needs a value")?;
-                    opts.wasm_target = target.clone();
-                }
-                "--root" => {
-                    i += 1;
-                    let root = rest.get(i).ok_or("--root needs a value")?;
-                    opts.root = PathBuf::from(root);
-                }
-                other => return Err(format!("unknown flag `{other}`")),
-            }
+            let flag = rest[i].clone();
+            apply_check_flag(&mut opts, rest, &mut i, &flag)?;
             i += 1;
         }
         Ok(Args::Check(opts))
@@ -172,6 +158,26 @@ impl Args {
         }
         Ok(Args::Dev(opts))
     }
+}
+
+/// One `gabion check` flag.
+fn apply_check_flag(
+    opts: &mut Options,
+    rest: &[String],
+    i: &mut usize,
+    flag: &str,
+) -> Result<(), String> {
+    match flag {
+        "--fast" => opts.fast = true,
+        "--no-external" => opts.no_external = true,
+        "--update-surfaces" => opts.update_surfaces = true,
+        "--fix" => opts.fix = true,
+        "--allow-missing-tools" => opts.allow_missing_tools = true,
+        "--target" => opts.wasm_target = value_for(rest, i, "--target")?.to_string(),
+        "--root" => opts.root = PathBuf::from(value_for(rest, i, "--root")?),
+        other => return Err(format!("unknown flag `{other}`")),
+    }
+    Ok(())
 }
 
 /// One `gabion dev` flag. Split out so the parser reads as a loop over flags and
@@ -250,7 +256,8 @@ gabion — one business core, every surface
   gabion new <name> [--dir PATH] [--gabion-path PATH]
   gabion feature add <name> [--root PATH]
   gabion dev [--once] [--run CMD] [--host PKG] [--interval MS] [--root PATH]
-  gabion check [--fast] [--no-external] [--update-surfaces] [--root PATH] [--target TRIPLE]
+  gabion check [--fast] [--no-external] [--update-surfaces] [--fix]
+               [--allow-missing-tools] [--root PATH] [--target TRIPLE]
 
   static rules (always):
     edge table        process wall, feature wall, upward leak, host purity
@@ -268,9 +275,14 @@ gabion — one business core, every surface
 
   --fast              static rules only, no subprocesses
   --update-surfaces   rewrite the surface lock (the 'I meant to publish that' gesture)
+  --fix               apply the mechanical findings (pub -> pub(crate), the lock)
+                      and re-run; what is left needs a decision
+  --allow-missing-tools  report a missing cargo-shear/cargo-deny as a named SKIP
+                      instead of a failure. Never silent: the summary counts them.
 ";
     eprint!("{text}");
     Summary {
+        skipped: Vec::new(),
         notes: Vec::new(),
         findings: Vec::new(),
         steps: Vec::new(),
@@ -281,6 +293,7 @@ gabion — one business core, every surface
 fn usage_error(message: &str) -> Summary {
     eprintln!("gabion: {message} (try `gabion --help`)");
     Summary {
+        skipped: Vec::new(),
         notes: Vec::new(),
         findings: Vec::new(),
         steps: Vec::new(),

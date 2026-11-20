@@ -29,11 +29,19 @@ pub fn new_app(opts: &NewOptions) -> Summary {
     let scaffold = crate::scaffold::app(&opts.name, &gabion, &cfg);
     match scaffold.write(&dir) {
         Ok(written) => Summary {
+            skipped: Vec::new(),
             notes: vec![
                 format!("created {} file(s) in {}", written.len(), dir.display()),
-                "the scaffold copied the walls: clippy.toml, [workspace.lints], the edge table, \
-                 and a surface lock with the operations it publishes"
-                    .to_string(),
+                match refresh_lock(&dir) {
+                    Ok(ops) => format!(
+                        "the scaffold copied the walls: clippy.toml, [workspace.lints], the edge \
+                         table, and a surface lock with {ops} reviewed operation(s)"
+                    ),
+                    Err(e) => format!(
+                        "the walls are written but the surface lock could not be generated \
+                         ({e}); run `gabion check --update-surfaces` once the workspace builds"
+                    ),
+                },
                 format!(
                     "next: cd {} && cargo build -p {}-host-server",
                     dir.display(),
@@ -115,20 +123,17 @@ pub fn add_feature(opts: &FeatureOptions) -> Summary {
     if let Err(e) = std::fs::write(&manifest_path, updated) {
         return failure(format!("cannot write {}: {e}", manifest_path.display()));
     }
-    let entries = crate::scaffold::lock_entries(&name, &opts.name);
-    if let Err(e) = record_operations(&opts.root, &entries) {
-        return failure(e);
-    }
+    let operations = refresh_lock(&opts.root).unwrap_or(0);
     Summary {
+        skipped: Vec::new(),
         notes: vec![
             format!(
                 "added feature `{}`: {}-api | {}-core | {}-render",
                 opts.name, opts.name, opts.name, opts.name
             ),
             format!(
-                "workspace members updated; .gabion/surfaces.lock now lists {} operation(s) — \
-                 review them like an API change",
-                entries.len()
+                "workspace members updated; .gabion/surfaces.lock now lists {operations} \
+                 operation(s) — review them like an API change"
             ),
             "next: fill in the impl, then `gabion check`".to_string(),
         ],
@@ -138,18 +143,25 @@ pub fn add_feature(opts: &FeatureOptions) -> Summary {
     }
 }
 
-/// The new trait's operations are published the moment the file exists, so the
-/// lock is updated in the same step: the diff is the review. Leaving it stale
-/// would make the first thing a new feature does fail the gate.
-fn record_operations(root: &std::path::Path, entries: &[String]) -> Result<(), String> {
-    let path = root.join(crate::surfaces::LOCK_PATH);
-    let current = std::fs::read_to_string(&path).unwrap_or_default();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+/// Write the surface lock with the gate's own collector, and report how many
+/// operations it found.
+///
+/// The scaffold does not format lock lines itself: a line carries a hash of the
+/// operation's signature, so a hand-written one would be stale the first time a
+/// type changed. Running the collector makes a scaffolded app's lock correct by
+/// construction.
+fn refresh_lock(root: &std::path::Path) -> Result<usize, String> {
+    let cfg = crate::config::Config::load(root)?;
+    let graph = crate::graph::load(root, &cfg)?;
+    if let Some(finding) = crate::surfaces::check(&graph, root, true).first() {
+        return Err(finding.detail.clone());
     }
-    std::fs::write(&path, crate::scaffold::add_lock_entries(&current, entries))
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))
+    let text = std::fs::read_to_string(root.join(crate::surfaces::LOCK_PATH))
+        .map_err(|e| format!("cannot read the lock back: {e}"))?;
+    Ok(text
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+        .count())
 }
 
 /// The app name, which `gabion new` writes into `[workspace.metadata.gabion]`.
@@ -192,6 +204,7 @@ pub fn dev(opts: &crate::dev::Options) -> Summary {
 
 fn pass(note: &str) -> Summary {
     Summary {
+        skipped: Vec::new(),
         notes: vec![note.to_string()],
         findings: Vec::new(),
         steps: Vec::new(),
@@ -201,6 +214,7 @@ fn pass(note: &str) -> Summary {
 
 fn failure(message: String) -> Summary {
     Summary {
+        skipped: Vec::new(),
         notes: Vec::new(),
         findings: Vec::new(),
         steps: Vec::new(),

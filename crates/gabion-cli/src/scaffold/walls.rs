@@ -55,51 +55,6 @@ pub fn workspace_lints(cfg: &Config) -> String {
     out
 }
 
-/// Merge new operation lines into a surface lock, keeping the header comment and
-/// the sort order `--update-surfaces` writes.
-///
-/// `gabion feature add` does this rather than telling the user to run the gate:
-/// the lock's purpose is to make publishing an op a reviewed diff, and a diff the
-/// command writes in the same commit is exactly that. Leaving it stale would make
-/// the first thing a new feature does is fail the gate.
-#[must_use]
-pub fn add_lock_entries(lock: &str, entries: &[String]) -> String {
-    let mut header: Vec<&str> = lock
-        .lines()
-        .filter(|l| l.trim_start().starts_with('#'))
-        .collect();
-    if header.is_empty() {
-        header.push("# gabion public surface. Every line is reachable over CLI, HTTP,");
-        header.push("# MCP and the typed client. Review changes here like an API change.");
-    }
-    let mut ops: Vec<String> = lock
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(String::from)
-        .chain(entries.iter().cloned())
-        .collect();
-    ops.sort();
-    ops.dedup();
-    let mut out = header.join("\n");
-    out.push('\n');
-    for op in ops {
-        out.push_str(&op);
-        out.push('\n');
-    }
-    out
-}
-
-/// The operations a scaffolded feature publishes, in the lock's line format.
-#[must_use]
-pub fn lock_entries(name: &str, feature: &str) -> Vec<String> {
-    let svc = svc_name(feature);
-    ["create", "list"]
-        .iter()
-        .map(|op| format!("{name}-{feature}-api::{svc}Service::{op}"))
-        .collect()
-}
-
 /// Add paths to the workspace `members` array, textually, so comments and layout
 /// survive. Verified by re-parsing: a members list that no longer parses is a
 /// workspace that no longer builds, and the caller gets told.

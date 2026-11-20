@@ -5,6 +5,43 @@
 //! context can satisfy the gate without reading the spec.
 
 use std::fmt;
+use std::path::PathBuf;
+
+/// A change `gabion check --fix` can make without judgement: the rule already
+/// decided what is wrong, and the repair is the same text edit every time.
+///
+/// Only mechanical findings get one. A finding whose fix needs a decision (move
+/// this type to `*-api`, split this function) carries advice and nothing else,
+/// because a tool that rewrites architecture is a tool nobody can review.
+#[derive(Debug, Clone)]
+pub struct Fix {
+    /// File to edit, as the finding reported it.
+    pub path: PathBuf,
+    /// 1-based line the replacement applies to.
+    pub line: usize,
+    /// Exact text expected on that line, so a stale line number is refused rather
+    /// than mangling a file.
+    pub from: String,
+    /// What to write instead.
+    pub to: String,
+}
+
+impl Fix {
+    #[must_use]
+    pub fn new(
+        path: impl Into<PathBuf>,
+        line: usize,
+        from: impl Into<String>,
+        to: impl Into<String>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            line,
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+}
 
 /// A single architecture or style violation.
 pub struct Finding {
@@ -16,6 +53,8 @@ pub struct Finding {
     pub detail: String,
     /// How to fix it correctly (not how to suppress it).
     pub fix: &'static str,
+    /// The mechanical repair, when there is one.
+    pub mechanical: Option<Fix>,
 }
 
 impl Finding {
@@ -31,7 +70,15 @@ impl Finding {
             location: location.into(),
             detail: detail.into(),
             fix,
+            mechanical: None,
         }
+    }
+
+    /// Attach the text edit `--fix` should make.
+    #[must_use]
+    pub fn with_fix(mut self, fix: Fix) -> Self {
+        self.mechanical = Some(fix);
+        self
     }
 }
 
@@ -54,6 +101,10 @@ pub struct Summary {
     pub steps: Vec<String>,
     /// Steps that failed (a failing subprocess is reported separately).
     pub failed_steps: Vec<String>,
+    /// Steps skipped *on purpose*, with the reason. A skipped gate is named in
+    /// the same output as a passing one: "not installed" and "ran and passed"
+    /// must never look alike.
+    pub skipped: Vec<String>,
 }
 
 impl Summary {
@@ -72,17 +123,26 @@ impl Summary {
         for step in &self.failed_steps {
             println!("FAIL step:{step}\n");
         }
+        for step in &self.skipped {
+            println!("SKIP step:{step}\n");
+        }
         if self.ok() {
+            let skipped = if self.skipped.is_empty() {
+                String::new()
+            } else {
+                format!(" ({} skipped)", self.skipped.len())
+            };
             println!(
-                "gabion check: PASS ({} steps: {})",
+                "gabion check: PASS ({} steps: {}){skipped}",
                 self.steps.len(),
                 self.steps.join(", ")
             );
         } else {
             println!(
-                "gabion check: {} rule violation(s), {} failing step(s)",
+                "gabion check: {} rule violation(s), {} failing step(s), {} skipped",
                 self.findings.len(),
-                self.failed_steps.len()
+                self.failed_steps.len(),
+                self.skipped.len()
             );
         }
     }
