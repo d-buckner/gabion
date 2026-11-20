@@ -162,7 +162,7 @@ fn finding(krate: &Crate, public: &Public) -> Finding {
          something another crate may name, and an item nothing calls does not need to be on \
          the outside of it. `gabion check --fix` applies this one.",
     )
-    .with_fix(Fix::new(
+    .with_fix(Fix::replace(
         &public.path,
         public.keyword_line,
         "pub ",

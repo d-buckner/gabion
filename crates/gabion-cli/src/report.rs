@@ -14,31 +14,49 @@ use std::path::PathBuf;
 /// this type to `*-api`, split this function) carries advice and nothing else,
 /// because a tool that rewrites architecture is a tool nobody can review.
 #[derive(Debug, Clone)]
-pub struct Fix {
-    /// File to edit, as the finding reported it.
-    pub path: PathBuf,
-    /// 1-based line the replacement applies to.
-    pub line: usize,
-    /// Exact text expected on that line, so a stale line number is refused rather
-    /// than mangling a file.
-    pub from: String,
-    /// What to write instead.
-    pub to: String,
+pub enum Fix {
+    /// Replace one line's text. `from` is checked first, so a stale line number is
+    /// refused rather than rewriting the wrong line.
+    Replace {
+        path: PathBuf,
+        /// 1-based.
+        line: usize,
+        from: String,
+        to: String,
+    },
+    /// Add text at the end of the file — how a missing table or key is repaired
+    /// without rewriting a file the app owns.
+    Append { path: PathBuf, text: String },
 }
 
 impl Fix {
     #[must_use]
-    pub fn new(
+    pub fn replace(
         path: impl Into<PathBuf>,
         line: usize,
         from: impl Into<String>,
         to: impl Into<String>,
     ) -> Self {
-        Self {
+        Self::Replace {
             path: path.into(),
             line,
             from: from.into(),
             to: to.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn append(path: impl Into<PathBuf>, text: impl Into<String>) -> Self {
+        Self::Append {
+            path: path.into(),
+            text: text.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &std::path::Path {
+        match self {
+            Fix::Replace { path, .. } | Fix::Append { path, .. } => path,
         }
     }
 }

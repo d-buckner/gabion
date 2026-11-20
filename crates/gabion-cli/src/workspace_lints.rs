@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::config::Config;
 use crate::graph::Graph;
-use crate::report::Finding;
+use crate::report::{Finding, Fix};
 
 const RULE: &str = "workspace-lints";
 
@@ -73,25 +73,7 @@ pub fn check(root: &Path, graph: &Graph, cfg: &Config) -> Vec<Finding> {
         out
     };
 
-    for krate in &graph.crates {
-        let manifest = krate.dir.join("Cargo.toml");
-        let Ok(text) = std::fs::read_to_string(&manifest) else {
-            continue;
-        };
-        let opted = text
-            .parse::<toml::Value>()
-            .ok()
-            .and_then(|v| v.get("lints")?.get("workspace")?.as_bool())
-            .unwrap_or(false);
-        if !opted {
-            out.push(Finding::new(
-                RULE,
-                format!("{}/Cargo.toml", krate.rel_dir),
-                format!("crate `{}` does not opt into [workspace.lints]", krate.name),
-                "add [lints] workspace = true; the workspace wall is inert for a crate that omits it.",
-            ));
-        }
-    }
+    out.extend(opt_in_findings(graph));
     out
 }
 
@@ -104,4 +86,37 @@ fn rank(level: &str) -> u8 {
         "warn" => 1,
         _ => 0,
     }
+}
+
+/// Every member must carry `[lints] workspace = true`, or the block is inert for it.
+fn opt_in_findings(graph: &Graph) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for krate in &graph.crates {
+        let manifest = krate.dir.join("Cargo.toml");
+        let Ok(text) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        let opted = text
+            .parse::<toml::Value>()
+            .ok()
+            .and_then(|v| v.get("lints")?.get("workspace")?.as_bool())
+            .unwrap_or(false);
+        if !opted {
+            findings.push(
+                Finding::new(
+                    RULE,
+                    format!("{}/Cargo.toml", krate.rel_dir),
+                    format!("crate `{}` does not opt into [workspace.lints]", krate.name),
+                    "add [lints] workspace = true; the workspace wall is inert for a crate that omits it. `gabion check --fix` appends it.",
+                )
+                // Mechanical: one table, always the same shape, appended to a file
+                // the crate owns.
+                .with_fix(Fix::append(
+                    manifest.clone(),
+                    "\n[lints]\nworkspace = true\n",
+                )),
+            );
+        }
+    }
+    findings
 }

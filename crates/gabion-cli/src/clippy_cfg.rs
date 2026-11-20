@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use crate::config::Config;
-use crate::report::Finding;
+use crate::report::{Finding, Fix};
 
 #[must_use]
 pub fn check(root: &Path, cfg: &Config) -> Vec<Finding> {
@@ -47,12 +47,15 @@ pub fn check(root: &Path, cfg: &Config) -> Vec<Finding> {
 
     for (key, max) in &cfg.max_thresholds {
         match value.get(key).and_then(toml::Value::as_integer) {
-            None => out.push(Finding::new(
-                "clippy-config",
-                "clippy.toml",
-                format!("required threshold `{key}` is missing"),
-                "the complexity gates are part of the wall; keep the key at or below the gabion default.",
-            )),
+            None => out.push(
+                Finding::new(
+                    "clippy-config",
+                    "clippy.toml",
+                    format!("required threshold `{key}` is missing"),
+                    "the complexity gates are part of the wall; keep the key at or below the gabion default. `gabion check --fix` restores it.",
+                )
+                .with_fix(Fix::append(&path, format!("{key} = {max}\n"))),
+            ),
             Some(have) if have > *max => out.push(Finding::new(
                 "clippy-config",
                 "clippy.toml",
