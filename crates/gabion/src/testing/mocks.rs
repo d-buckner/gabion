@@ -1,10 +1,10 @@
-//! Deterministic capability impls for tests: virtual clock, in-memory store,
-//! scripted http. Core tests never touch real time or disk — that is what makes
-//! them pure.
+//! The deterministic capability impls: a virtual clock, an in-memory store,
+//! scripted http. Split from `testing` so the bundle and the mocks each stay a
+//! readable size.
 
 use crate::async_trait;
 use crate::caps::{
-    Caps, Clock, Http, HttpError, HttpMethod, HttpRequest, HttpResponse, Random, Sleep, Store,
+    Clock, Http, HttpError, HttpMethod, HttpRequest, HttpResponse, Random, Sleep, Store,
     StoreError, Timer, Timestamp,
 };
 use std::collections::BTreeMap;
@@ -107,9 +107,29 @@ impl Clock for MockClock {
 }
 
 /// In-memory Store; cheap and deterministic.
+///
+/// It also records who made each write through [`Store::set_as`], because that is
+/// the only way a core test can prove the caller reached the store: the capability
+/// is generic over `Store`, so `written_by` has to be asked of the concrete impl.
 #[derive(Clone, Default)]
 pub struct InMemoryStore {
     map: Arc<Mutex<BTreeMap<String, String>>>,
+    writers: Arc<Mutex<BTreeMap<String, String>>>,
+}
+
+impl InMemoryStore {
+    /// The principal that last wrote `key` through [`Store::set_as`], if any.
+    ///
+    /// `None` means either the key was never written, or it was written through
+    /// [`Store::set`] by code that had no caller to record — which is the honest
+    /// answer, not an empty string.
+    #[must_use]
+    pub fn written_by(&self, key: &str) -> Option<String> {
+        self.writers
+            .lock()
+            .ok()
+            .and_then(|map| map.get(key).cloned())
+    }
 }
 
 #[async_trait]
@@ -134,6 +154,26 @@ impl Store for InMemoryStore {
             .lock()
             .map_err(|e| StoreError::Io(e.to_string()))?
             .remove(key);
+        self.writers
+            .lock()
+            .map_err(|e| StoreError::Io(e.to_string()))?
+            .remove(key);
+        Ok(())
+    }
+
+    async fn set_as(
+        &self,
+        ctx: &crate::ctx::Ctx,
+        key: &str,
+        value: &str,
+    ) -> Result<(), StoreError> {
+        self.set(key, value).await?;
+        if let Some(principal) = ctx.principal() {
+            self.writers
+                .lock()
+                .map_err(|e| StoreError::Io(e.to_string()))?
+                .insert(key.to_string(), principal.to_string());
+        }
         Ok(())
     }
     async fn list(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
@@ -321,78 +361,5 @@ impl Http for MockHttp {
                 request.url
             ))
         })
-    }
-}
-
-/// Test capability bundle.
-#[derive(Clone)]
-pub struct TestCaps {
-    clock: MockClock,
-    store: InMemoryStore,
-    random: MockRandom,
-    sleep: MockSleep,
-    http: MockHttp,
-}
-
-impl TestCaps {
-    #[must_use]
-    pub fn new() -> Self {
-        let clock = MockClock::new(Timestamp(1_700_000_000));
-        Self {
-            store: InMemoryStore::default(),
-            random: MockRandom::new(0x5EED),
-            sleep: MockSleep::new(clock.time().clone()),
-            http: MockHttp::default(),
-            clock,
-        }
-    }
-
-    /// The virtual clock, so a test can advance time without a `Sleep` handle.
-    #[must_use]
-    pub fn time(&self) -> &MockTime {
-        self.clock.time()
-    }
-
-    /// Swap in a scripted `http`, so a core that calls out is testable without a
-    /// socket: `TestCaps::new().with_http(MockHttp::new().route(..))`.
-    #[must_use]
-    pub fn with_http(mut self, http: MockHttp) -> Self {
-        self.http = http;
-        self
-    }
-
-    /// The http capability, so a test can read back what the core asked to send.
-    #[must_use]
-    pub fn http(&self) -> &MockHttp {
-        &self.http
-    }
-}
-
-impl Default for TestCaps {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Caps for TestCaps {
-    type Clock = MockClock;
-    type Store = InMemoryStore;
-    type Random = MockRandom;
-    type Sleep = MockSleep;
-    type Http = MockHttp;
-    fn clock(&self) -> &Self::Clock {
-        &self.clock
-    }
-    fn store(&self) -> &Self::Store {
-        &self.store
-    }
-    fn random(&self) -> &Self::Random {
-        &self.random
-    }
-    fn sleep(&self) -> &Self::Sleep {
-        &self.sleep
-    }
-    fn http(&self) -> &Self::Http {
-        &self.http
     }
 }

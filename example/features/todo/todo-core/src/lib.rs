@@ -36,7 +36,7 @@ fn internal() -> TodoErr {
 
 #[async_trait]
 impl<C: Caps> TodoService for TodoServiceImpl<C> {
-    async fn create(&self, _ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr> {
+    async fn create(&self, ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr> {
         if input.title.trim().is_empty() {
             return Err(todo_err(TodoError::EmptyTitle));
         }
@@ -51,7 +51,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
         let json = gabion::serde_json::to_string(&todo).map_err(|_| internal())?;
         self.caps
             .store()
-            .set(&Self::key(&id), &json)
+            .set_as(ctx, &Self::key(&id), &json)
             .await
             .map_err(|_| internal())?;
         Ok(todo)
@@ -168,6 +168,53 @@ mod tests {
             svc.list(&Ctx::anonymous(), ()).await.unwrap().len(),
             2,
             "a record was silently overwritten"
+        );
+    }
+
+    /// The caller reaches the storage layer: this is the half of `Ctx` that no
+    /// surface could prove, because it is about what an *effect* may record.
+    #[tokio::test]
+    async fn a_write_records_who_made_it() {
+        let caps = TestCaps::new();
+        let svc = TodoServiceImpl::new(caps.clone());
+        let ctx = Ctx::anonymous().with_principal("agent-7");
+        let todo = svc
+            .create(
+                &ctx,
+                CreateTodo {
+                    title: "milk".into(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            caps.store()
+                .written_by(&TodoServiceImpl::<TestCaps>::key(&todo.id)),
+            Some("agent-7".to_string()),
+            "the principal the surface delivered must reach the store"
+        );
+    }
+
+    /// A write with no caller records nothing, rather than an empty string: the
+    /// absence of an identity must not look like one.
+    #[tokio::test]
+    async fn an_anonymous_write_records_no_writer() {
+        let caps = TestCaps::new();
+        let svc = TodoServiceImpl::new(caps.clone());
+        let todo = svc
+            .create(
+                &Ctx::anonymous(),
+                CreateTodo {
+                    title: "milk".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            caps.store()
+                .written_by(&TodoServiceImpl::<TestCaps>::key(&todo.id)),
+            None
         );
     }
 
