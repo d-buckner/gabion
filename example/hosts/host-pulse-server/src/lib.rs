@@ -33,7 +33,13 @@ pub fn services() -> (Checks, Incidents) {
 
 /// Everything this host serves, from the two lines that choose the impls.
 pub fn host() -> gabion::registry::Host {
-    let (checks, incidents) = services();
+    host_from(services())
+}
+
+/// The same, over impls the caller built — so a test can serve the exact
+/// instances it will also call in-process, which is what makes the four-surface
+/// comparison in `tests/conformance.rs` a comparison at all.
+pub fn host_from((checks, incidents): (Checks, Incidents)) -> gabion::registry::Host {
     let mut host = gabion::registry::Host::new();
     checks.mount_on(&mut host);
     incidents.mount_on(&mut host);
@@ -44,7 +50,12 @@ pub fn host() -> gabion::registry::Host {
 /// routes, the MCP endpoint, and the OpenAPI documents that describe the routes
 /// an agent's tool list came from.
 pub fn app() -> axum::Router {
-    gabion_native::host_router(&mut host()).route("/openapi.json", get(contract))
+    app_from(services())
+}
+
+/// The same app over impls the caller built.
+pub fn app_from(services: (Checks, Incidents)) -> axum::Router {
+    gabion_native::host_router(&mut host_from(services)).route("/openapi.json", get(contract))
 }
 
 /// The same services as one MCP server, for the stdio transport.

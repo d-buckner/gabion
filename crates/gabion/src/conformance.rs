@@ -88,10 +88,15 @@ impl Agreement {
     }
 }
 
-/// Every case's four answers.
+/// Every case's four answers, plus the cases that never ran.
 #[derive(Debug, Default)]
 pub struct Report {
     pub agreements: Vec<Agreement>,
+    /// Cases the suite could not drive — an op no adapter implements, an input
+    /// that does not parse into the declared type. A case that never ran is not
+    /// four adapters agreeing; counting it as one is how a suite goes green while
+    /// testing nothing.
+    pub rejected: Vec<String>,
 }
 
 impl Report {
@@ -101,18 +106,35 @@ impl Report {
         self.agreements.push(agreement);
     }
 
+    /// A case that could not be driven. The reason is kept, because "the suite
+    /// did not run this" and "the suite ran this and it agreed" must not look the
+    /// same in a report.
+    pub fn reject(&mut self, op: &str, why: impl Into<String>) {
+        self.rejected.push(format!("{op}: {}", why.into()));
+    }
+
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.failures().is_empty()
     }
 
-    /// One line per disagreement, ready to be a test's assertion message.
+    /// One line per disagreement, plus one per case that never ran. Ready to be a
+    /// test's assertion message.
     #[must_use]
     pub fn failures(&self) -> Vec<String> {
-        self.agreements
+        let mut out: Vec<String> = self
+            .agreements
             .iter()
             .filter_map(Agreement::disagreement)
-            .collect()
+            .collect();
+        out.extend(self.rejected.iter().cloned());
+        out
+    }
+
+    /// Cases that ran, which is what the summary line counts.
+    #[must_use]
+    pub fn ran(&self) -> usize {
+        self.agreements.len()
     }
 
     /// A test-friendly message: what disagreed, or how many cases agreed.
@@ -120,15 +142,12 @@ impl Report {
     pub fn summary(&self) -> String {
         let failures = self.failures();
         if failures.is_empty() {
-            return format!(
-                "all four surfaces agreed on {} case(s)",
-                self.agreements.len()
-            );
+            return format!("all four surfaces agreed on {} case(s)", self.ran());
         }
         format!(
-            "{} of {} case(s) disagreed across surfaces:\n  {}",
+            "{} problem(s) across {} case(s):\n  {}",
             failures.len(),
-            self.agreements.len(),
+            self.ran() + self.rejected.len(),
             failures.join("\n  ")
         )
     }
@@ -143,6 +162,22 @@ pub fn ok_value<T: Serialize>(value: &T) -> Value {
         Ok(v) => v,
         Err(e) => Value::String(format!("<did not serialize: {e}>")),
     }
+}
+
+/// A failure that arrived as a bare `WireError` — from the MCP tool path or from
+/// the CLI's exit — as the suite compares it.
+#[must_use]
+pub fn wire_value(wire: &WireError) -> Value {
+    serde_json::to_value(wire)
+        .unwrap_or_else(|e| Value::String(format!("<wire error did not serialize: {e}>")))
+}
+
+/// A value a surface returned as text (the CLI renders pretty JSON). Text that
+/// does not parse is compared as text, so a surface that started writing prose is
+/// a disagreement rather than a silence.
+#[must_use]
+pub fn text_value(text: &str) -> Value {
+    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
 }
 
 /// A failure as the suite compares it: the same flat `WireError` the route and
@@ -216,6 +251,18 @@ mod tests {
             json!({"a": 1}),
         );
         assert!(broken.disagreement().is_some());
+    }
+
+    /// A case that could not be driven fails the report. Otherwise a typo in the
+    /// case list is a green suite with one fewer case in it.
+    #[test]
+    fn a_rejected_case_is_a_failure() {
+        let mut report = Report::default();
+        report.record(clean());
+        report.reject("todo.nope", "no adapter implements this op");
+        assert!(!report.is_clean());
+        assert_eq!(report.ran(), 1);
+        assert!(report.summary().contains("todo.nope"));
     }
 
     #[test]

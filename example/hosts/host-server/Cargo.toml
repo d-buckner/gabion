@@ -21,6 +21,9 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 gabion = { workspace = true }
+# Test-build only: the agreement suite drives all four adapters, and the server
+# binary itself should not carry clap to do it.
+todo-api = { path = "../../features/todo/todo-api", features = ["conformance"] }
 serde_json = { workspace = true }
 clap = { workspace = true }
 

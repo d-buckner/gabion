@@ -46,10 +46,10 @@ async fn main() {
         Some(("incident", sub)) => {
             incidents_api::__incident_cli::incident_cli_dispatch(&incidents, &ctx, sub).await
         }
-        _ => Err(CliExit {
-            code: 2,
-            message: "choose a `check` or `incident` command".to_string(),
-        }),
+        _ => Err(CliExit::new(
+            gabion::prelude::ErrorKind::InvalidInput,
+            "choose a `check` or `incident` command",
+        )),
     };
 
     match outcome {

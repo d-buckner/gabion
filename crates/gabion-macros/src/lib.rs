@@ -28,11 +28,13 @@ use quote::{format_ident, quote};
 
 mod cli;
 mod client;
+mod conformance;
 mod mcp;
 mod registry;
 mod server;
 use cli::gen_cli;
 use client::gen_client;
+use conformance::gen_conformance;
 use mcp::gen_mcp;
 use registry::gen_registry;
 use server::gen_server;
@@ -144,6 +146,7 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let client = gen_client(&c);
     let mcp = gen_mcp(&c);
     let registration = gen_registry(&c);
+    let conformance = gen_conformance(&c);
     Ok(quote! {
         #cleaned
         #server
@@ -151,6 +154,7 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
         #client
         #mcp
         #registration
+        #conformance
     })
 }
 

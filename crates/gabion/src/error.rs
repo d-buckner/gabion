@@ -61,6 +61,20 @@ impl ErrorKind {
             ErrorKind::Internal => 1,
         }
     }
+    /// The inverse of [`ErrorKind::exit_code`], for a caller that only has a
+    /// process status. `None` for a code no surface produces: 0 is success, and
+    /// `2` is deliberately `InvalidInput` because that is what clap uses for a
+    /// usage error too.
+    #[must_use]
+    pub fn from_exit_code(code: i32) -> Option<Self> {
+        match code {
+            1 => Some(ErrorKind::Internal),
+            2 => Some(ErrorKind::InvalidInput),
+            3 => Some(ErrorKind::NotFound),
+            4 => Some(ErrorKind::Conflict),
+            _ => None,
+        }
+    }
 }
 
 /// The in-process error: `E` is the app's own error enum, so nothing is lost
@@ -257,6 +271,22 @@ mod tests {
         assert_eq!(ErrorKind::NotFound.mcp_code(), -32001);
         assert_eq!(ErrorKind::NotFound.exit_code(), 3);
         assert_eq!(ErrorKind::Internal.exit_code(), 1);
+    }
+
+    /// Every mapping round-trips, so a surface that only has a status can recover
+    /// the kind. A code that no surface produces is `None`, not `Internal`.
+    #[test]
+    fn every_exit_code_maps_back_to_its_kind() {
+        for kind in [
+            ErrorKind::NotFound,
+            ErrorKind::InvalidInput,
+            ErrorKind::Conflict,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(ErrorKind::from_exit_code(kind.exit_code()), Some(kind));
+        }
+        assert_eq!(ErrorKind::from_exit_code(0), None);
+        assert_eq!(ErrorKind::from_exit_code(99), None);
     }
 
     #[test]

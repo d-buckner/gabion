@@ -57,7 +57,10 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
                 {
                     let raw = sm.get_one::<String>("json").cloned().unwrap_or_else(|| "null".into());
                     let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
-                        ::gabion::cli::CliExit { code: 2, message: format!("bad --json: {e}") }
+                        ::gabion::cli::CliExit::new(
+                            ::gabion::error::ErrorKind::InvalidInput,
+                            format!("bad --json: {e}"),
+                        )
                     })?;
                     svc.#id(&ctx, input).await
                 }
@@ -66,10 +69,9 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
         };
         quote! {
             Some((#name, sm)) => #call
-                .map_err(|e| ::gabion::cli::CliExit {
-                    code: e.kind.exit_code(),
-                    message: e.message.clone(),
-                })
+                // One projection for every failure: the exit carries the same
+                // wire envelope the route sends, so the four surfaces compare.
+                .map_err(|e| ::gabion::cli::CliExit::from_service(&e))
                 .and_then(|v| ::gabion::cli::render_json(&v)),
         }
     });
@@ -110,10 +112,10 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
                 }
                 match m.subcommand() {
                     #(#dispatch_arms)*
-                    _ => Err(::gabion::cli::CliExit {
-                        code: 2,
-                        message: format!("unknown subcommand for {}", #ns),
-                    }),
+                    _ => Err(::gabion::cli::CliExit::new(
+                        ::gabion::error::ErrorKind::InvalidInput,
+                        format!("unknown subcommand for {}", #ns),
+                    )),
                 }
             }
         }

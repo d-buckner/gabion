@@ -55,10 +55,7 @@ fn main() {
         match matches.subcommand() {
             Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref(), &ctx)
                 .await
-                .map_err(|e| gabion::cli::CliExit {
-                    code: e.kind.exit_code(),
-                    message: e.message,
-                }),
+                .map_err(|e| gabion::cli::CliExit::from_service(&e)),
             Some(("todo", m)) => {
                 todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), &ctx, m).await
             }
