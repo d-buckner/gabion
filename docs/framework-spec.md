@@ -240,6 +240,8 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> { /* business logic */ }
   the real `WebCaps` (js Date, localStorage, js crypto, `setTimeout`, `fetch`),
   so its cores run in the page; `host-web` (todo) still wires `TestCaps`
   (mock clock/store/random/sleep/http) as a wasm wall proof only.
+- `Store::set_as(&ctx, ..)` carries the caller on a write, so an implementation can
+  record who wrote a row (`FileStore` keeps a `<path>.writers.json` sidecar).
 - Storage v1: abstract `Store` trait; `FileStore` is the shipped native impl
   (pure Rust, no C deps keeps the single-binary promise). It loads the file once
   and keeps the map in memory, rewriting on each mutation, so a screen that asks
