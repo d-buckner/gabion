@@ -2,11 +2,12 @@
 
 # gabion
 
-**A Rust app framework with a wall built into it.**
+**One business core, every surface — and a wall that blocks the shortcuts.**
 
-One business core. Native, browser (wasm), server — every surface generated from
-one `#[service]` declaration, with the shortcuts that rot an agent-written
-codebase made unrepresentable.
+Write one core; it runs natively, in the browser as WebAssembly, and on a server.
+Every surface — HTTP, CLI, MCP, OpenAPI, typed client — is generated from a single
+`#[service]` declaration, and the shortcuts that rot an agent-written codebase are
+unrepresentable rather than discouraged.
 
 [![CI](https://github.com/d-buckner/gabion/actions/workflows/ci.yml/badge.svg)](https://github.com/d-buckner/gabion/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -21,17 +22,16 @@ codebase made unrepresentable.
 
 ## What it is
 
-gabion is a cross-platform Rust app framework for codebases a lot of people (and
-agents) will write into. You write one business core, and it runs natively, in the
-browser as WebAssembly, and on a server. gabion generates the HTTP routes, the
-CLI, the MCP tools, the OpenAPI document and the typed client from that core, so
-no hand-written handler drifts from the contract.
+gabion is a cross-platform Rust app framework for codebases that a lot of people
+— and agents — will write into. You write one business core, and the framework
+generates and enforces everything around it.
 
-The rest of the framework is a wall. It is named for
-[gabion walls](https://en.wikipedia.org/wiki/Gabion): cages of rocks that hold
-back a slope while water drains through. The geometry does the work, so nobody has
-to remember to maintain them. Here the geometry is the crate graph, the compile
-targets, and the static gates.
+The name is the design. A [gabion wall](https://en.wikipedia.org/wiki/Gabion) is a
+cage of rocks that holds back a slope while water drains through. The geometry does
+the work, so nobody has to remember to maintain it. Here the geometry is the crate
+graph, the compile targets and the static gates: the architecture is held by the
+shape of the code, not by a reviewer's memory. That is why the rest of this page
+keeps saying "wall".
 
 ## The problem
 
