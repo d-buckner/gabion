@@ -2,11 +2,13 @@
 name = "gabion-native"
 version.workspace = true
 edition.workspace = true
-# v0.1 ships as a git/path dependency; not published to crates.io yet.
-publish = false
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+readme.workspace = true
 description = "Native capability impls (SystemClock). Host-side only — never imported by *-core."
+keywords = ["native", "capabilities", "tokio", "reqwest", "mcp"]
+categories = ["asynchronous", "network-programming"]
 
 [features]
 default = []

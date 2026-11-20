@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "checks-api"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "bytes",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "checks-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "gabion",
@@ -1903,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "gabion"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-trait",
  "gabion-macros",
@@ -1916,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "gabion-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "gabion-macros"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1938,7 +1938,7 @@ dependencies = [
 
 [[package]]
 name = "gabion-native"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "gabion",
@@ -2372,7 +2372,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "host-native"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "clap",
  "dioxus",
@@ -2386,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "host-pulse-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "checks-core",
@@ -2400,7 +2400,7 @@ dependencies = [
 
 [[package]]
 name = "host-pulse-native"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "checks-core",
@@ -2415,7 +2415,7 @@ dependencies = [
 
 [[package]]
 name = "host-pulse-server"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "checks-api",
@@ -2430,7 +2430,7 @@ dependencies = [
 
 [[package]]
 name = "host-pulse-web"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "checks-core",
@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "host-server"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "clap",
@@ -2463,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "host-web"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "dioxus",
  "gabion",
@@ -2742,7 +2742,7 @@ checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
 
 [[package]]
 name = "incidents-api"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "bytes",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "incidents-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "gabion",
@@ -4110,7 +4110,7 @@ checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 
 [[package]]
 name = "pulse-render"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "checks-api",
  "dioxus",
@@ -5394,7 +5394,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "todo-api"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "bytes",
@@ -5408,7 +5408,7 @@ dependencies = [
 
 [[package]]
 name = "todo-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "gabion",
  "todo-api",
@@ -5417,7 +5417,7 @@ dependencies = [
 
 [[package]]
 name = "todo-render"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxus-ssr",
@@ -5703,7 +5703,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ui-shared"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "dioxus",
 ]

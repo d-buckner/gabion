@@ -24,10 +24,17 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 license = "MIT"
 authors = ["Daniel Buckner"]
+# Inherited by the four published crates. An inherited path is resolved
+# relative to the *workspace* manifest, so "README.md" (not "../../README.md")
+# is what lands in each crate. No `homepage`: it would duplicate repository, and
+# cargo warns `redundant_homepage`. Without repository, `cargo package` warns
+# "manifest has no documentation, homepage or repository".
+repository = "https://github.com/d-buckner/gabion"
+readme = "README.md"
 
 # gabion's own gate configuration. `gabion check` reads this; `gabion new`
 # generates the same block into every app it scaffolds.
@@ -72,9 +79,16 @@ too_many_arguments = "deny"
 type_complexity = "deny"
 
 [workspace.dependencies]
-gabion = { path = "crates/gabion" }
-gabion-macros = { path = "crates/gabion-macros" }
-gabion-native = { path = "crates/gabion-native" }
+# `version` alongside `path` is what makes publishing possible: cargo drops the
+# path when it writes the published manifest, and a path-only dependency has no
+# requirement left to publish, so the uploaded crate cannot resolve. Locally the
+# path still wins, so workspace development is unchanged.
+# The requirement carries the full pre-release because semver excludes
+# pre-releases from a bare `0.1` requirement: gabion could not resolve
+# gabion-macros 0.1.0-alpha.1 otherwise. Tighten back to "0.1" when 0.1.0 ships.
+gabion = { path = "crates/gabion", version = "0.1.0-alpha.1" }
+gabion-macros = { path = "crates/gabion-macros", version = "0.1.0-alpha.1" }
+gabion-native = { path = "crates/gabion-native", version = "0.1.0-alpha.1" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
