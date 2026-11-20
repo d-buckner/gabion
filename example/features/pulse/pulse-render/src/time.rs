@@ -7,7 +7,7 @@
 /// `2025-11-19 19:45Z` in UTC, from unix seconds. Hand-rolled so the render crate
 /// stays free of time crates (and of `std::time`, which the gate bans). The `Z`
 /// stays: the render crate has no clock and no zone, so UTC is the honest label.
-pub fn stamp(at: u64) -> String {
+pub(crate) fn stamp(at: u64) -> String {
     #[allow(clippy::cast_possible_truncation)] // day count of a u64 second count
     let days = (at / 86_400) as i64;
     let secs = at % 86_400;

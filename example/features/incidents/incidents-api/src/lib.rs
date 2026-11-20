@@ -9,7 +9,7 @@ use checks_api::CheckId;
 use gabion::prelude::*;
 
 /// One outage of one watch.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Incident {
     pub id: String,
     pub check_id: String,
@@ -24,7 +24,7 @@ pub struct Incident {
 }
 
 /// How much of a watch's recent history came back.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Uptime {
     pub check_id: String,
     /// Probes counted, which is the whole history up to the window cap.

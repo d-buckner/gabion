@@ -83,6 +83,115 @@ fn a_pub_nobody_names_is_over_broad_and_the_fix_applies() {
     );
 }
 
+/// `render -> render` is allowed, because composing two features on one screen is
+/// the normal case — and the visibility rule is what keeps the edge from meaning
+/// "reach into another feature's private components". Here the shell render crate
+/// composes both feature renders, and every component it names is `pub` in the
+/// crate that owns it.
+#[test]
+fn a_render_crate_may_compose_another_feature_render() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            (
+                "Cargo.toml",
+                &ws_head(&["todo-api", "todo-core", "todo-render", "billing-api", "billing-render", "app-render", "host-app"]),
+            ),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("todo-api/Cargo.toml", &member("todo-api", &[])),
+            ("todo-api/src/lib.rs", "#[service]\npub trait TodoService {\n    async fn a(&self) -> u8;\n}\n"),
+            ("todo-core/Cargo.toml", &member("todo-core", &["todo-api"])),
+            ("todo-core/src/lib.rs", "pub struct TodoImpl;\n"),
+            (
+                "todo-render/Cargo.toml",
+                &member("todo-render", &["todo-api"]),
+            ),
+            ("todo-render/src/lib.rs", "pub fn TodoPanel() -> u8 {\n    1\n}\n"),
+            ("billing-api/Cargo.toml", &member("billing-api", &[])),
+            ("billing-render/Cargo.toml", &member("billing-render", &["billing-api"])),
+            ("billing-render/src/lib.rs", "pub fn BillingPanel() -> u8 {\n    2\n}\n"),
+            // The composition root: two features on one screen.
+            (
+                "app-render/Cargo.toml",
+                &member("app-render", &["todo-render", "billing-render"]),
+            ),
+            (
+                "app-render/src/lib.rs",
+                "pub fn App() -> u8 {\n    todo_render::TodoPanel() + billing_render::BillingPanel()\n}\n",
+            ),
+            (
+                "host-app/Cargo.toml",
+                &member("host-app", &["todo-core", "app-render"]),
+            ),
+            (
+                "host-app/src/lib.rs",
+                "fn main() {\n    let _ = todo_core::TodoImpl;\n    let _ = app_render::App();\n}\nfn m(s: &dyn todo_api::TodoService) {\n    let _ = s;\n}\n",
+            ),
+        ],
+    );
+
+    let found = summary(tmp.path());
+    let rules: Vec<&str> = found.findings.iter().map(|f| f.rule).collect();
+    assert!(
+        !rules.contains(&"edge-table") && !rules.contains(&"process-wall"),
+        "composing two feature UIs is not a violation: {rules:?}"
+    );
+    assert!(
+        !rules.contains(&"over-broad-visibility"),
+        "every named component is published, and nothing else is `pub`: {rules:?}"
+    );
+}
+
+/// The other half of that edge: a render crate's private helper must not be `pub`,
+/// or "compose another feature's UI" turns into "reach into its internals".
+#[test]
+fn a_render_internal_marked_pub_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            (
+                "Cargo.toml",
+                &ws_head(&["x-api", "x-render", "app-render", "host-app"]),
+            ),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", "pub trait X {}\n"),
+            ("x-render/Cargo.toml", &member("x-render", &["x-api"])),
+            (
+                "x-render/src/lib.rs",
+                "pub fn Panel() -> u8 {\n    helper()\n}\npub fn helper() -> u8 {\n    0\n}\n",
+            ),
+            (
+                "app-render/Cargo.toml",
+                &member("app-render", &["x-render"]),
+            ),
+            (
+                "app-render/src/lib.rs",
+                "pub fn App() -> u8 {\n    x_render::Panel()\n}\n",
+            ),
+            // The composition root is launched by a host, so its entry point is
+            // named — otherwise it would be a `pub` nobody uses, which is a finding
+            // for the same reason a helper is.
+            ("host-app/Cargo.toml", &member("host-app", &["app-render"])),
+            (
+                "host-app/src/lib.rs",
+                "fn main() {\n    let _ = app_render::App();\n}\n",
+            ),
+        ],
+    );
+    let found = summary(tmp.path());
+    let hits: Vec<&str> = found
+        .findings
+        .iter()
+        .filter(|f| f.rule == "over-broad-visibility")
+        .map(|f| f.detail.as_str())
+        .collect();
+    assert_eq!(hits.len(), 1, "exactly the private helper: {hits:?}");
+    assert!(hits[0].contains("helper"), "{hits:?}");
+}
+
 /// A hand-written axum handler in a feature crate bypasses the contract: the
 /// route exists, and the OpenAPI document, the MCP tool and the client do not
 /// know about it. Hosts may wire endpoints; features may not.

@@ -101,7 +101,11 @@ fn default_edges() -> BTreeMap<&'static str, Vec<String>> {
     // The spec's allowed-edges table, made machine-readable.
     m.insert("api", v(&["framework", "shared", "api"]));
     m.insert("core", v(&["framework", "shared", "api"]));
-    m.insert("render", v(&["framework", "shared", "api"]));
+    // Render may depend on render: a feature's UI is a library of components, and
+    // composing two features on one screen is the normal case. What keeps that
+    // from becoming "reach into another feature's internals" is the visibility
+    // rule, which treats `pub` in a render crate as published surface.
+    m.insert("render", v(&["framework", "shared", "api", "render"]));
     m.insert("shared", v(&["framework"]));
     m.insert("host", v(&["framework", "shared", "api", "core", "render"]));
     m.insert("framework", v(&["framework"]));

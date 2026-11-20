@@ -18,5 +18,11 @@ gabion = { workspace = true }
 dioxus = { workspace = true, default-features = false, features = ["macro", "html", "signals", "hooks"] }
 # NOTE: no todo-core here. That is the wall. The host injects the impl.
 
+[dev-dependencies]
+dioxus-ssr = "0.7"
+# The snapshot test drives the published view with a fixture impl of the contract,
+# which is the only way to render a list without reaching into todo-core.
+tokio = { workspace = true }
+
 [lints]
 workspace = true

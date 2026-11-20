@@ -63,7 +63,48 @@ impl Svc {
     }
 }
 
-/// The todo screen. Reads the injected [`Svc`] from context.
+/// The todo list, as a component another screen may mount.
+///
+/// Props only: the items as data and one callback for the checkbox. It does not
+/// take a service handle, so a crate composing this panel inherits one function
+/// signature and the `*-api` types — not `Svc`, not the trait, and not the store
+/// behind them.
+///
+/// `pub(crate)` today, because nothing outside composes it yet: a component is
+/// published when something uses it, and `over-broad-visibility` is the rule that
+/// will ask for the `pub` when that happens.
+///
+/// ```ignore
+/// rsx! { TodoPanel { items, on_toggle } }
+/// ```
+#[component]
+pub(crate) fn TodoPanel(items: Vec<Todo>, on_toggle: EventHandler<TodoId>) -> Element {
+    if items.is_empty() {
+        return rsx! { p { class: "muted", "nothing to do" } };
+    }
+    rsx! {
+        ul {
+            for t in items {
+                li {
+                    key: "{t.id}",
+                    class: if t.done { "done" } else { "" },
+                    input {
+                        r#type: "checkbox",
+                        checked: t.done,
+                        onchange: {
+                            let id = t.id.clone();
+                            move |_| on_toggle.call(TodoId(id.clone()))
+                        },
+                    },
+                    span { "{t.title}" }
+                }
+            }
+        }
+    }
+}
+
+/// The todo screen: reads the injected [`Svc`] from context, owns the form and the
+/// banners, and renders [`TodoPanel`] for the list.
 #[component]
 pub fn TodoApp() -> Element {
     let svc = use_context::<Svc>();
@@ -79,39 +120,24 @@ pub fn TodoApp() -> Element {
     // Reading the resource in the body subscribes this scope: the component
     // re-renders whenever the list refetches. The match yields owned values,
     // so nothing borrows outlives the statement.
+    let toggle = EventHandler::new({
+        let svc = svc.clone();
+        move |id: TodoId| {
+            let svc = svc.clone();
+            spawn(async move {
+                let _ = svc.inner.complete(&svc.ctx, id).await;
+                refresh(todos);
+            });
+        }
+    });
+
+    // Reading the resource in the body subscribes this scope: the component
+    // re-renders whenever the list refetches. The match yields owned values,
+    // so nothing borrows outlives the statement.
     let list_view = match todos() {
         None => rsx! { p { class: "muted", "loading…" } },
         Some(Err(e)) => rsx! { p { class: "err", "{e}" } },
-        Some(Ok(items)) => rsx! {
-            if items.is_empty() {
-                p { class: "muted", "nothing to do" }
-            }
-            ul {
-                for t in items {
-                    li {
-                        key: "{t.id}",
-                        class: if t.done { "done" } else { "" },
-                        input {
-                            r#type: "checkbox",
-                            checked: t.done,
-                            onchange: {
-                                let svc = svc.clone();
-                                let id = t.id.clone();
-                                move |_| {
-                                    let svc = svc.clone();
-                                    let id = id.clone();
-                                    spawn(async move {
-                                        let _ = svc.inner.complete(&svc.ctx, TodoId(id)).await;
-                                        refresh(todos);
-                                    });
-                                }
-                            },
-                        },
-                        span { "{t.title}" }
-                    }
-                }
-            }
-        },
+        Some(Ok(items)) => rsx! { TodoPanel { items, on_toggle: toggle } },
     };
 
     rsx! {
@@ -170,7 +196,8 @@ pub async fn render_list(
     Ok(out)
 }
 
-/// A "controller": user action -> service call. Same code native and wasm.
+/// A "controller": user action -> service call, for a caller that does not hold a
+/// component's props. Same code native and wasm.
 pub async fn on_add_clicked(
     svc: &(dyn TodoService + Send + Sync),
     ctx: &Ctx,
@@ -185,10 +212,75 @@ pub async fn on_add_clicked(
     .await
 }
 
-pub async fn on_checkbox_clicked(
-    svc: &(dyn TodoService + Send + Sync),
-    ctx: &Ctx,
-    id: &str,
-) -> Result<Todo, TodoErr> {
-    svc.complete(ctx, TodoId(id.to_string())).await
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the markup
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)] // a snapshot test reads an env var and writes a file
+mod snapshot {
+    //! The published component, rendered to HTML and compared against a committed
+    //! file.
+    //!
+    //! This is the UI counterpart of `openapi_snapshot.rs`: a component can keep its
+    //! props and change what it shows, and nothing on the wire would notice. The
+    //! snapshot makes that a diff someone reads.
+    //!
+    //! Bless with `GABION_BLESS_UI=1 cargo test -p todo-render`.
+
+    use super::*;
+
+    /// The panel with fixture data, as a component: props are built inside a
+    /// runtime, which is where Dioxus allocates them.
+    #[component]
+    fn Fixture() -> Element {
+        let items = vec![
+            Todo {
+                id: "t1".into(),
+                title: "buy sandspice".into(),
+                done: false,
+                created_at: 1_700_000_000,
+            },
+            Todo {
+                id: "t2".into(),
+                title: "ship it".into(),
+                done: true,
+                created_at: 1_700_000_001,
+            },
+        ];
+        // The handler is a prop, and SSR renders the markup a handler cannot change,
+        // so a no-op is the honest fixture: this snapshots what the panel *shows*.
+        rsx! {
+            TodoPanel { items, on_toggle: move |_id: TodoId| {} }
+        }
+    }
+
+    fn html() -> String {
+        let mut dom = VirtualDom::new(Fixture);
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    fn path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../.gabion/ui/todo-panel.html")
+    }
+
+    #[test]
+    fn the_panel_markup_matches_the_committed_snapshot() {
+        let rendered = html();
+        let path = path();
+        if std::env::var("GABION_BLESS_UI").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &rendered).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "no snapshot at {}: {e}. Run `GABION_BLESS_UI=1 cargo test -p todo-render`,                  then read the diff.",
+                path.display()
+            )
+        });
+        assert_eq!(
+            rendered, committed,
+            "the panel markup changed. If it should have, re-bless and review the diff."
+        );
+    }
 }

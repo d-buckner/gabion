@@ -65,7 +65,9 @@ fn every_rule_bites() {
                 "x-render/Cargo.toml",
                 &member("x-render", &["x-api", "x-core"]),
             ),
-            ("x-render/src/lib.rs", "pub fn r() {}\n"),
+            // `pub(crate)`: nothing outside composes it, and the visibility rule
+            // holds a render crate to the same standard as a core one.
+            ("x-render/src/lib.rs", "pub(crate) fn r() {}\n"),
             // host: business logic in a composition root
             ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
             (
@@ -198,7 +200,7 @@ pub trait XInternals {
             // the service trait (so the contract is served).
             (
                 "host-x/src/lib.rs",
-                "fn main() {\n    let _ = x_core::f(None);\n}\nfn mount(s: &dyn x_api::XService) {\n    let _ = s;\n}\n",
+                "fn main() {\n    let _ = x_core::f(None);\n    x_render::r();\n}\nfn mount(s: &dyn x_api::XService) {\n    let _ = s;\n}\n",
             ),
         ],
     );
@@ -267,7 +269,9 @@ fn edge_finding_names_the_wall_and_the_fix() {
                 "x-render/Cargo.toml",
                 &member("x-render", &["x-api", "x-core"]),
             ),
-            ("x-render/src/lib.rs", "pub fn r() {}\n"),
+            // `pub(crate)`: nothing outside composes it, and the visibility rule
+            // holds a render crate to the same standard as a core one.
+            ("x-render/src/lib.rs", "pub(crate) fn r() {}\n"),
         ],
     );
     let mut opts = Options::new(tmp.path());

@@ -7,6 +7,12 @@
 //! one of the two contracts. The UI never learns that uptime is computed from
 //! probe history, and it never sees a store.
 //!
+//! Composition is two layers. [`StatusApp`] is the screen: it reads the injected
+//! handles from context, loads, and renders app chrome. [`board::BoardPanel`] is
+//! the part another feature may mount, and it takes only props — rows, outages and
+//! one callback. A crate composing this feature's UI names the panel and the wire
+//! types, never `Svc` or the two service traits.
+//!
 //! ```ignore
 //! dioxus::LaunchBuilder::new()
 //!     .with_context(pulse_render::Svc { checks, incidents })
@@ -23,9 +29,7 @@ use std::sync::Arc;
 mod board;
 mod time;
 
-use board::{board_view, latency, load};
-
-pub use time::stamp;
+use board::{board_body, latency, load};
 
 const CSS: &str = r#"
 :root { color-scheme: dark; }
@@ -251,7 +255,7 @@ pub fn StatusApp() -> Element {
     let body = match &*current {
         None => rsx! { p { class: "muted", "loading…" } },
         Some(Err(e)) => rsx! { p { class: "err", "{e}" } },
-        Some(Ok(loaded)) => board_view(loaded, &svc, ui),
+        Some(Ok(loaded)) => board_body(loaded, &svc, ui),
     };
 
     rsx! {

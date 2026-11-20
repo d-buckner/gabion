@@ -13,10 +13,18 @@
 //! *needed*; it is the one direction that is checkable, and it closes the failure
 //! that matters: internals becoming API by default.
 //!
+//! It applies to `*-render` for the same reason it applies to `*-core`, and that
+//! is what makes `render -> render` safe: a UI crate's `pub` items are its
+//! components (other features may compose them), and everything else is
+//! `pub(crate)`. Without this rule the new edge would mean "reach into another
+//! feature's private sub-components", which is the wall `render-isolation` used to
+//! buy by banning the edge outright.
+//!
 //! Limits, stated rather than hidden: the check reads names, not types, so a name
 //! mentioned in a comment counts as a use; it looks at top-level items, not
-//! associated functions; and it applies to `*-core` only, because a `*-render` and
-//! a `*-api` are public libraries by definition.
+//! associated functions or re-exports; and it does not apply to `*-api`, because a
+//! contract's whole purpose is to publish names — the surface lock is what governs
+//! which of them are reachable.
 
 use std::collections::BTreeSet;
 
@@ -84,7 +92,7 @@ impl<'ast> Visit<'ast> for Collector {
 /// outside — and a scaffold writes it before the host that names it exists.
 const BOILERPLATE: [&str; 4] = ["new", "default", "from", "fmt"];
 
-/// Every `pub` item in a core crate that no other crate names.
+/// Every `pub` item in a core or render crate that no other crate names.
 pub fn check(graph: &Graph) -> Vec<Finding> {
     let texts: Vec<(String, String)> = graph
         .crates
@@ -97,7 +105,11 @@ pub fn check(graph: &Graph) -> Vec<Finding> {
         .collect();
 
     let mut findings = Vec::new();
-    for krate in graph.crates.iter().filter(|c| c.class == Class::Core) {
+    for krate in graph
+        .crates
+        .iter()
+        .filter(|c| matches!(c.class, Class::Core | Class::Render))
+    {
         for public in publics_of(krate) {
             if BOILERPLATE.contains(&public.name.as_str()) || public.name.ends_with("Impl") {
                 continue;
@@ -142,12 +154,13 @@ fn finding(krate: &Crate, public: &Public) -> Finding {
         RULE,
         location,
         format!(
-            "`pub {}` in a *-core crate, and no other crate names it",
-            public.name
+            "`pub {}` in a {} crate, and no other crate names it",
+            public.name,
+            krate.class.key()
         ),
         "make it `pub(crate)`: `pub` is the boundary between an implementation detail and \
-         something a host may name, and an item nothing calls does not need to be on the \
-         outside of it. `gabion check --fix` applies this one.",
+         something another crate may name, and an item nothing calls does not need to be on \
+         the outside of it. `gabion check --fix` applies this one.",
     )
     .with_fix(Fix::new(
         &public.path,

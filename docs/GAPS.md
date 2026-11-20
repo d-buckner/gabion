@@ -54,8 +54,10 @@ recorded in §7.
 ## 4. Not built
 
 - **Renderer-agnostic UI kit.** The render crates print or use Dioxus directly;
-  there is no shared component kit, and the spec still lists that as an open
-  decision.
+  there is no shared component kit (tokens, layout, table, button), and the spec
+  still lists that as an open decision. Composition itself is no longer blocked —
+  `render -> render` is open and panels take props — but two features' panels do not
+  yet *look* like each other.
 - **`Ctx` propagation into capability impls.** The caller reaches every service
   method, but a `Store` write does not know who is writing. Per-record attribution
   is an app decision until something needs it.
@@ -138,6 +140,32 @@ config and no way to run it in a browser.
 - **`pub` past the wall.** `over-broad-visibility` + `--fix`; see §3 for the limit.
   Proven by `a_pub_nobody_names_is_over_broad_and_the_fix_applies`, which asserts
   the item a host *does* name is left alone.
+- **Feature UIs could not be composed.** `render-isolation` banned `render ->
+  render`, which made "put two features on one screen" a rule violation and pushed
+  the only legal composition into a crate that had to be hand-waved as not-a-render.
+  The edge is open now, and the wall moved rather than disappeared: `over-broad-
+  visibility` applies to `*-render`, so `pub` means "a component another feature may
+  compose" and everything else is `pub(crate)`. `render -> core` is untouched, so
+  UI composition can never reach business logic, and a cycle between two render
+  crates is still a cargo error. Proven by
+  `a_render_crate_may_compose_another_feature_render` (two feature renders plus a
+  composition root pass) and `a_render_internal_marked_pub_is_a_finding` (a `pub`
+  helper inside one is still a finding). The rule immediately found three
+  published-and-uncalled items in this repo's own examples.
+- **A UI change was invisible.** A component could keep its props and change what
+  it shows, and nothing on the wire would notice. `.gabion/ui/` now holds a
+  committed snapshot per published panel — `todo-list.txt` (the string view),
+  `todo-panel.html` and `board-panel.html` (the components, rendered through
+  `dioxus-ssr` from fixture data inside a `VirtualDom`, so no runtime is
+  required) — re-blessed with `GABION_BLESS_UI=1` and compared otherwise. The UI
+  counterpart of `openapi_snapshot.rs`. Proven by the two snapshot tests, which
+  fail when the markup and the committed file disagree.
+- **UI components took service handles.** `BoardPanel` and `TodoPanel` now take
+  props — data from `*-api` plus a callback — so a composing screen inherits one
+  signature and the wire types, not `Svc` and the store behind it. App chrome (the
+  form, the toolbar, the banners) stays in the app component that owns the loading.
+  They are `pub(crate)` until a second screen mounts them, at which point the
+  visibility rule asks for the `pub`.
 - **A hand-written HTTP handler.** `axum-outside-host`; see §3 for the limit.
   Proven by `axum_outside_a_host_is_a_finding` (a feature crate is a finding, a
   host crate importing the same path is not, and the framework's own transport is
