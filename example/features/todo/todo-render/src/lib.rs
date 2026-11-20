@@ -63,7 +63,48 @@ impl Svc {
     }
 }
 
-/// The todo screen. Reads the injected [`Svc`] from context.
+/// The todo list, as a component another screen may mount.
+///
+/// Props only: the items as data and one callback for the checkbox. It does not
+/// take a service handle, so a crate composing this panel inherits one function
+/// signature and the `*-api` types — not `Svc`, not the trait, and not the store
+/// behind them.
+///
+/// `pub(crate)` today, because nothing outside composes it yet: a component is
+/// published when something uses it, and `over-broad-visibility` is the rule that
+/// will ask for the `pub` when that happens.
+///
+/// ```ignore
+/// rsx! { TodoPanel { items, on_toggle } }
+/// ```
+#[component]
+pub(crate) fn TodoPanel(items: Vec<Todo>, on_toggle: EventHandler<TodoId>) -> Element {
+    if items.is_empty() {
+        return rsx! { p { class: "muted", "nothing to do" } };
+    }
+    rsx! {
+        ul {
+            for t in items {
+                li {
+                    key: "{t.id}",
+                    class: if t.done { "done" } else { "" },
+                    input {
+                        r#type: "checkbox",
+                        checked: t.done,
+                        onchange: {
+                            let id = t.id.clone();
+                            move |_| on_toggle.call(TodoId(id.clone()))
+                        },
+                    },
+                    span { "{t.title}" }
+                }
+            }
+        }
+    }
+}
+
+/// The todo screen: reads the injected [`Svc`] from context, owns the form and the
+/// banners, and renders [`TodoPanel`] for the list.
 #[component]
 pub fn TodoApp() -> Element {
     let svc = use_context::<Svc>();
@@ -79,39 +120,24 @@ pub fn TodoApp() -> Element {
     // Reading the resource in the body subscribes this scope: the component
     // re-renders whenever the list refetches. The match yields owned values,
     // so nothing borrows outlives the statement.
+    let toggle = EventHandler::new({
+        let svc = svc.clone();
+        move |id: TodoId| {
+            let svc = svc.clone();
+            spawn(async move {
+                let _ = svc.inner.complete(&svc.ctx, id).await;
+                refresh(todos);
+            });
+        }
+    });
+
+    // Reading the resource in the body subscribes this scope: the component
+    // re-renders whenever the list refetches. The match yields owned values,
+    // so nothing borrows outlives the statement.
     let list_view = match todos() {
         None => rsx! { p { class: "muted", "loading…" } },
         Some(Err(e)) => rsx! { p { class: "err", "{e}" } },
-        Some(Ok(items)) => rsx! {
-            if items.is_empty() {
-                p { class: "muted", "nothing to do" }
-            }
-            ul {
-                for t in items {
-                    li {
-                        key: "{t.id}",
-                        class: if t.done { "done" } else { "" },
-                        input {
-                            r#type: "checkbox",
-                            checked: t.done,
-                            onchange: {
-                                let svc = svc.clone();
-                                let id = t.id.clone();
-                                move |_| {
-                                    let svc = svc.clone();
-                                    let id = id.clone();
-                                    spawn(async move {
-                                        let _ = svc.inner.complete(&svc.ctx, TodoId(id)).await;
-                                        refresh(todos);
-                                    });
-                                }
-                            },
-                        },
-                        span { "{t.title}" }
-                    }
-                }
-            }
-        },
+        Some(Ok(items)) => rsx! { TodoPanel { items, on_toggle: toggle } },
     };
 
     rsx! {

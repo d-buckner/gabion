@@ -6,7 +6,7 @@
 use gabion::prelude::*;
 
 /// One URL under watch.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Check {
     pub id: String,
     pub name: String,
@@ -20,18 +20,18 @@ pub struct Check {
 
 /// What to watch. The cadence is the service's policy, not the caller's, so a
 /// caller cannot schedule a probe every millisecond.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NewCheck {
     pub name: String,
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CheckId(pub String);
 
 /// One observation. A probe that got a `500` is still a successful probe: it
 /// observed an outage. Only a request that never became a response is a miss.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Probe {
     pub check_id: String,
     pub at: u64,
@@ -47,7 +47,7 @@ pub struct Probe {
 }
 
 /// A watch with its most recent observation, which is what a status page shows.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CheckReport {
     pub check: Check,
     pub last: Option<Probe>,
