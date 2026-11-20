@@ -36,6 +36,7 @@ pub fn run(args: &[String]) -> (Summary, ExitCode) {
             (summary, code)
         }
         Ok(Args::Help) => (help(), ExitCode::SUCCESS),
+        Ok(Args::Version) => (version(), ExitCode::SUCCESS),
         Err(message) => (usage_error(&message), ExitCode::FAILURE),
     }
 }
@@ -68,6 +69,7 @@ pub enum Args {
     FeatureRemove(FeatureOptions),
     Dev(crate::dev::Options),
     Help,
+    Version,
 }
 
 impl Args {
@@ -81,6 +83,7 @@ impl Args {
             "feature" => Self::parse_feature(&args[1..]),
             "dev" => Self::parse_dev(&args[1..]),
             "-h" | "--help" | "help" => Ok(Args::Help),
+            "-V" | "--version" | "version" => Ok(Args::Version),
             other => Err(format!("unknown subcommand `{other}`")),
         }
     }
@@ -272,6 +275,7 @@ gabion — one business core, every surface
   gabion dev [--once] [--run CMD] [--host PKG] [--interval MS] [--root PATH]
   gabion check [--fast] [--no-external] [--update-surfaces] [--fix]
                [--allow-missing-tools] [--root PATH] [--target TRIPLE]
+  gabion --help | --version
 
   static rules (always):
     edge table        process wall, feature wall, upward leak, host purity
@@ -295,13 +299,22 @@ gabion — one business core, every surface
                       instead of a failure. Never silent: the summary counts them.
 ";
     eprint!("{text}");
-    Summary {
-        skipped: Vec::new(),
-        notes: Vec::new(),
-        findings: Vec::new(),
-        steps: Vec::new(),
-        failed_steps: Vec::new(),
-    }
+    Summary::silent()
+}
+
+/// The `--version` line, on stdout: this is the one line a script or a bug
+/// report captures, where the help text is a human reading a terminal.
+fn version() -> Summary {
+    println!("{}", version_line());
+    Summary::silent()
+}
+
+/// The version string, split out so a test can assert on the exact text without
+/// capturing the process's own stdout. The binary is `gabion` even though the
+/// crate is `gabion-cli`, so the line names the command a person typed.
+#[must_use]
+pub fn version_line() -> String {
+    format!("gabion {}", env!("CARGO_PKG_VERSION"))
 }
 
 fn usage_error(message: &str) -> Summary {

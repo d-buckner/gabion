@@ -126,12 +126,39 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// A summary with nothing to report. `--help` and `--version` write their own
+    /// text and run no check, so the verdict line would be a lie — and worse,
+    /// it would land on stdout and corrupt `gabion --version > file`.
+    #[must_use]
+    pub fn silent() -> Self {
+        Self {
+            notes: Vec::new(),
+            findings: Vec::new(),
+            steps: Vec::new(),
+            failed_steps: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+
+    /// Nothing ran and nothing was found, so there is no verdict to print.
+    #[must_use]
+    pub fn is_silent(&self) -> bool {
+        self.notes.is_empty()
+            && self.findings.is_empty()
+            && self.steps.is_empty()
+            && self.failed_steps.is_empty()
+            && self.skipped.is_empty()
+    }
+
     #[must_use]
     pub fn ok(&self) -> bool {
         self.findings.is_empty() && self.failed_steps.is_empty()
     }
 
     pub fn print(&self) {
+        if self.is_silent() {
+            return;
+        }
         for note in &self.notes {
             println!("{note}");
         }
