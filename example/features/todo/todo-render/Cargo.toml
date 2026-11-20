@@ -6,9 +6,12 @@ edition.workspace = true
 publish = false
 license.workspace = true
 authors.workspace = true
-description = "todo UI. Depends on todo-api ONLY — todo-core is not in [dependencies], so importing core internals is unrepresentable."
+description = "todo UI. Depends on todo-api and the shared kit ONLY — todo-core is not in [dependencies], so importing core internals is unrepresentable."
 
 [dependencies]
+# Design tokens and the shared panel states. A `*-shared` crate may use the
+# framework and third-party crates, never a feature's contract.
+ui-shared = { path = "../../../shared/ui-shared" }
 todo-api = { path = "../todo-api" }
 # The runtime, for the types a screen carries: `Ctx` travels with the injected
 # handle so every call the UI makes is identified. No core, still.
