@@ -4,10 +4,7 @@
 
 **One business core, every surface — and a wall that blocks the shortcuts.**
 
-Write one core; it runs natively, in the browser as WebAssembly, and on a server.
-Every surface — HTTP, CLI, MCP, OpenAPI, typed client — is generated from a single
-`#[service]` declaration, and the shortcuts that rot an agent-written codebase are
-unrepresentable rather than discouraged.
+For codebases a lot of people — and agents — will write into.
 
 [![CI](https://github.com/d-buckner/gabion/actions/workflows/ci.yml/badge.svg)](https://github.com/d-buckner/gabion/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -22,9 +19,16 @@ unrepresentable rather than discouraged.
 
 ## What it is
 
-gabion is a cross-platform Rust app framework for codebases that a lot of people
-— and agents — will write into. You write one business core, and the framework
-generates and enforces everything around it.
+gabion is a cross-platform Rust app framework. You write one business core that
+runs natively, in the browser as WebAssembly, and on a server, and gabion generates
+every surface from it: HTTP, CLI, MCP, OpenAPI and a typed client.
+
+Every feature is split into `*-api`, `*-core` and `*-render` crates, and the crate
+graph enforces the boundaries instead of a linter: a render crate cannot import a
+core crate, and one feature cannot reach into another's internals. Because the
+compiler does the enforcing, there is no rule to forget and no lint to disable —
+which is what makes the codebase safe to hand to an agent. The shortcuts do not
+compile, so the slop does not pile up.
 
 The name is the design. A [gabion wall](https://en.wikipedia.org/wiki/Gabion) is a
 cage of rocks that holds back a slope while water drains through. The geometry does
@@ -41,9 +45,9 @@ It takes the shortest path that compiles. So the shortest path has to be the
 correct path.
 
 A style guide cannot enforce that, and a reviewer cannot enforce it at the rate an
-agent produces code. Only a mechanical block works — and it has to be stricter
-than a linter, because the failure gabion targets is not a typo. It is a plausible
-shortcut that passes every standard check.
+agent produces code. What is needed is a block, not advice — and the block has to
+catch something a normal check would pass, because the damaging change is not a
+typo. It is a plausible shortcut that satisfies every standard check.
 
 ## Demo
 
@@ -153,11 +157,10 @@ opt-in) and leaves the rest for a decision.
 
 Three layers. Each catches what the layer above it cannot.
 
-**1 · The crate graph.** A feature ships as `*-api` (wire types and the
-`#[service]` trait), `*-core` (the pure implementation), and `*-render` (the UI).
-`render` may not depend on `core` because the dependency is not in
-`[dependencies]` — the compiler says E0432. Feature A may name feature B's
-`*-api`, never its internals. There is no rule to forget and no lint to disable.
+**1 · The crate graph.** The boundary is a missing dependency: `render` cannot
+import `core` because `todo-core` is not in `[dependencies]`, and feature A can
+name feature B's `*-api` but never its internals. The compiler says E0432, and the
+error message is the documentation.
 
 **2 · The effect ban.** `*-core` compiles for `wasm32-unknown-unknown`, but rust's
 `std` ships wasm stubs for `fs`, `net`, `thread` and `time`, so a core that opens a
