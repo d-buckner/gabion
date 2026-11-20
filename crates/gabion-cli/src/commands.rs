@@ -14,19 +14,22 @@ pub fn new_app(opts: &NewOptions) -> Summary {
     if let Some(refusal) = refuse_occupied(&dir) {
         return refusal;
     }
-    let gabion = match &opts.gabion_path {
-        Some(path) => path.clone(),
-        None => default_gabion_path(),
-    };
-    if !gabion.join("crates/gabion/Cargo.toml").exists() {
-        return failure(format!(
-            "{} does not look like the gabion source tree (no crates/gabion/Cargo.toml). \
-             Pass --gabion-path PATH.",
-            gabion.display()
-        ));
+    // Only a *given* --gabion-path has to look like a checkout. Without it the
+    // scaffold depends on the published crates and there is nothing on disk to
+    // check, which is the point: a `cargo install`ed gabion has no checkout, and
+    // the build-time path it used to fall back to is a temp dir that no longer
+    // exists by the time anyone runs it.
+    if let Some(path) = &opts.gabion_path {
+        if !path.join("crates/gabion/Cargo.toml").exists() {
+            return failure(format!(
+                "{} does not look like the gabion source tree (no crates/gabion/Cargo.toml). \
+                 Pass --gabion-path PATH, or drop it to depend on the published crates.",
+                path.display()
+            ));
+        }
     }
     let cfg = crate::config::Config::default();
-    let scaffold = crate::scaffold::app(&opts.name, &gabion, &cfg);
+    let scaffold = crate::scaffold::app(&opts.name, opts.gabion_path.as_deref(), &cfg);
     match scaffold.write(&dir) {
         Ok(written) => Summary {
             skipped: Vec::new(),
@@ -47,7 +50,7 @@ pub fn new_app(opts: &NewOptions) -> Summary {
                     dir.display(),
                     opts.name
                 ),
-                "then: cargo run -p gabion-cli -- check".to_string(),
+                "then: gabion check".to_string(),
                 "when you add UI, its design system goes in a *-shared crate — the framework \
                  ships no styles"
                     .to_string(),
@@ -80,15 +83,6 @@ fn refuse_occupied(dir: &std::path::Path) -> Option<Summary> {
         "{} already exists and is not empty",
         dir.display()
     )))
-}
-
-/// The gabion source tree this binary was built from. v0.1 is path-dependency
-/// only, so a scaffold has to point at a checkout; `--gabion-path` overrides it.
-fn default_gabion_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
 }
 
 /// `gabion feature add`: three crates, three workspace members, and the lock

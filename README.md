@@ -100,14 +100,16 @@ Rust comes from [rustup](https://rustup.rs). `rust-toolchain.toml` pins stable a
 adds the wasm target, clippy and rustfmt automatically. The full gate also wants
 `cargo install cargo-shear cargo-deny` (`--no-external` skips them).
 
-Scaffolding a new app, from a checkout of this repo:
+The gate and the scaffolder ship as one crate, and neither needs a checkout —
+`gabion new` writes an app that depends on the published crates:
 
 ```console
-$ cargo run -p gabion-cli -- new myapp --dir /tmp/myapp --gabion-path "$PWD"
+$ cargo install gabion-cli
+$ gabion new myapp --dir /tmp/myapp
 created 15 file(s) in /tmp/myapp
 the scaffold copied the walls: clippy.toml, [workspace.lints], the edge table, and a surface lock with 2 reviewed operation(s)
 next: cd /tmp/myapp && cargo build -p myapp-host-server
-then: cargo run -p gabion-cli -- check
+then: gabion check
 when you add UI, its design system goes in a *-shared crate — the framework ships no styles
 gabion check: PASS (0 steps: )
 
@@ -140,12 +142,12 @@ workspace members, and rewrites the surface lock so the new operations are a dif
 you review:
 
 ```console
-$ cargo run -p gabion-cli -- feature add billing
+$ gabion feature add billing
 added feature `billing`: billing-api | billing-core | billing-render
 workspace members updated; .gabion/surfaces.lock now lists 4 operation(s) — review them like an API change
 ```
 
-`cargo run -p gabion-cli -- dev` watches, rebuilds and restarts. `check --fix`
+`gabion dev` watches, rebuilds and restarts. `check --fix`
 applies the mechanical findings (a narrowed `pub`, the lock, a missing lints
 opt-in) and leaves the rest for a decision.
 
@@ -290,13 +292,13 @@ docs/                   the spec, the rulebook, the gap log, the collab proposal
 
 ## Status
 
-v0.1, path-dependency only — `cargo run -p gabion-cli -- new` points at a checkout
-with `--gabion-path`. The examples run end to end and `gabion check` is green on
-this repo.
+v0.1, and on crates.io. `cargo install gabion-cli` then `gabion new` needs no
+checkout: the scaffold depends on the published `gabion` and `gabion-native`. The
+examples run end to end and `gabion check` is green on this repo.
 
 Not built yet: streaming surfaces (the refusal is built), an HTTP cancellation
-channel (MCP has one), `gabion host add`, a renderer other than Dioxus, and any
-publish story. The walls have known edges, and [**docs/STATUS.md**](docs/STATUS.md)
+channel (MCP has one), `gabion host add`, and a renderer other than Dioxus. The
+walls have known edges, and [**docs/STATUS.md**](docs/STATUS.md)
 names each one rather than leaving it to be discovered.
 
 ## Contributing

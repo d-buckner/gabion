@@ -69,9 +69,6 @@ recorded in §7.
   nothing. A wire-level cancel for HTTP would be a protocol of its own.
 - **Scaffolding for a second host.** `gabion new` writes two and `gabion feature
   add`/`remove` manage features; there is no `gabion host add`.
-- **The publish story.** v0.1 is path-dependency only (`publish = false`), so
-  `gabion new` takes `--gabion-path` and every scaffolded app points at a
-  checkout. This is a decision waiting on the name (spec §10), not a build task.
 - **A UI gallery.** Panels have per-component snapshots, but nothing renders them
   side by side for a visual review.
 
@@ -102,9 +99,11 @@ config and no way to run it in a browser.
   (`RUSTSEC-2024-0370` paste, `RUSTSEC-2024-0436` proc-macro-error) arrive via
   `dioxus-desktop → image → exr/rav1e` and an app cannot upgrade them.
   Vulnerabilities and notices are still deny.
-- `deny.toml`: `allow-workspace` / `allow-wildcard-paths`, with `publish = false`
-  on every member. Workspace path deps have no version requirement; Cargo.lock
-  is what pins them. A `"*"` from crates.io still fails.
+- `deny.toml`: `allow-workspace` / `allow-wildcard-paths`. The `example/*` crates
+  are `publish = false` and their workspace path deps carry no version
+  requirement; Cargo.lock is what pins them. The four framework crates do carry
+  one — `cargo publish` needs it — so they are not wildcards. A `"*"` from
+  crates.io still fails.
 - `deny.toml`: `CDLA-Permissive-2.0` is an allowed license. One crate uses it:
   `webpki-roots`, the bundled Mozilla root-certificate set the native `Http`
   capability trusts. It is a data license, not a code license. The alternative is

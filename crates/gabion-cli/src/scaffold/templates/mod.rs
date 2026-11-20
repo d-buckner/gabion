@@ -9,7 +9,7 @@
 //! its own gate.
 //!
 //! Placeholders: `%NAME%` (the app), `%FEATURE%` (the feature folder), `%SVC%`
-//! (the type prefix, capitalised), `%GABION%` (path to the gabion crates).
+//! (the type prefix, capitalised), `%GABION_DEPS%` (the two framework deps).
 //!
 //! The hosts are in `hosts.rs`: they are composition roots, not feature shape, and
 //! a host template that grows a second surface does not belong in this file.
@@ -49,8 +49,7 @@ unclassified = []
 %LINTS%
 
 [workspace.dependencies]
-gabion = { path = "%GABION%/crates/gabion" }
-gabion-native = { path = "%GABION%/crates/gabion-native" }
+%GABION_DEPS%
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1.2"
