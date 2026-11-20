@@ -53,10 +53,13 @@ recorded in §7.
 
 ## 4. Not built
 
-- **Renderer-agnostic UI kit.** `example/shared/ui-shared` holds the tokens and the
-  shared states, so panels now look like one app. What it is not is a component
-  framework: no table, no form, no router, and no second renderer. The spec's "Dioxus
-  as the recommended default, renderer-agnostic" decision is still open.
+- **A renderer other than Dioxus.** The kit and the render crates are Dioxus. The
+  framework does not depend on that choice — it ships no UI at all (`framework-ui`)
+  and the surfaces are HTTP/MCP/clap — but nothing in the repo demonstrates a second
+  renderer, and spec §2's "pluggable renderer" decision is still open in practice.
+- **Portable components.** A panel can be composed inside its app; it cannot travel
+  to another app, because it uses its app's `*-shared` kit. A headless/themeable kit
+  would be a product of its own, and deliberately not this one.
 - **Streaming surfaces** (`Stream` return support) — v1 or v2 is still open in the
   spec. What exists now is the refusal: a streaming return is a compile error with
   a reason (§7), rather than four generated surfaces that cannot carry a stream.
@@ -164,14 +167,19 @@ config and no way to run it in a browser.
   form, the toolbar, the banners) stays in the app component that owns the loading.
   They are `pub(crate)` until a second screen mounts them, at which point the
   visibility rule asks for the `pub`.
-- **Feature UIs did not look alike.** `ui-shared` (class `shared`, so every render
-  crate and host may use it and it may use the framework only) holds the design
-  tokens as one CSS string and the components every panel shares: `Surface`,
-  `Heading`, `Action`, `Empty`, `Failure`, `Notice`. Both render crates use it, so
-  the API has two callers rather than being published on faith — and the committed
-  UI snapshots did not change, because a refactor with no visual difference should
-  not churn the artifact. Plain CSS rather than a bundler step: the desktop window
-  applies exactly what the page applies.
+- **Feature UIs did not look alike.** `example/shared/ui-shared` — an *app-level*
+  crate, class `shared`, so every render crate and host in that app may use it and it
+  may use the framework only — holds the design tokens as one CSS string and the
+  components every panel shares: `Surface`, `Heading`, `Action`, `Empty`, `Failure`,
+  `Notice`. Both example render crates use it, so the API has two callers rather than
+  being published on faith, and the committed UI snapshots did not change, because a
+  refactor with no visual difference should not churn the artifact. Plain CSS rather
+  than a bundler step: the desktop window applies exactly what the page applies.
+  **It is not the framework's**, and `framework-ui` is the rule that keeps it that
+  way: a framework crate that renders — `rsx!`, a `dangerous_inner_html`, a
+  `font-family`, a `color-scheme` — is a finding, because a look in the runtime is a
+  house style every app inherits. Proven by `the_framework_may_not_carry_ui` (a
+  framework crate marked as one, clean, then given a style constant).
 - **A workspace-level digest missed cross-crate types.** The lock hashed a
   definition only when it lived in the same crate, so a method taking
   `other_api::Shared` recorded that type by name. The digest now builds one

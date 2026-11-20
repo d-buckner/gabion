@@ -48,6 +48,9 @@ pub fn new_app(opts: &NewOptions) -> Summary {
                     opts.name
                 ),
                 "then: cargo run -p gabion-cli -- check".to_string(),
+                "when you add UI, its design system goes in a *-shared crate — the framework \
+                 ships no styles"
+                    .to_string(),
             ],
             findings: Vec::new(),
             steps: Vec::new(),

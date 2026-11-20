@@ -1,17 +1,22 @@
-//! The shared UI kit: design tokens and the shapes every panel shares.
+//! **This is the examples' design system, not the framework's.**
 //!
-//! Two feature UIs that compose on one screen should look like one app. Before this
-//! crate each render crate carried its own stylesheet and its own idea of "empty"
-//! and "failed", which is how a composed screen ends up with two palettes and three
-//! kinds of grey. The kit is the smallest thing that fixes that: the tokens, the
-//! page surface, and the states every panel has (empty, failed, loading).
+//! gabion ships no UI: no components, no tokens, no stylesheet, no default theme,
+//! and `framework-ui` fails the gate if that ever stops being true. A look belongs to
+//! an app, so a design system is an app-level crate — this one, named `*-shared` so
+//! the edge table lets every `render` crate and every host use it and lets it use
+//! the framework only. An app that wants to look nothing like this should replace
+//! the file, not configure it; nothing in the framework reads it.
 //!
-//! Deliberately not a component framework. It holds what two panels would otherwise
-//! duplicate, and nothing else — a kit that grows a table, a form, and a router is a
-//! renderer, and the framework's promise is that the renderer is pluggable.
+//! Why it exists at all: two feature UIs that compose on one screen should look like
+//! one app. Before it, each render crate carried its own stylesheet and its own idea
+//! of "empty" and "failed", which is how a composed screen ends up with two palettes
+//! and three kinds of grey.
 //!
-//! It depends on `dioxus` and on nothing else: a `*-shared` crate may use the
-//! framework and third-party crates, never a feature's contract.
+//! Deliberately not a component framework, and deliberately not portable: features
+//! live inside an app (`features/todo/`, `features/checks/`), so a feature's render
+//! crate may use its app's kit. A component library meant for *other* apps would need
+//! headless components and a theme parameter — that is a different product, and this
+//! is not it.
 
 use dioxus::prelude::*;
 

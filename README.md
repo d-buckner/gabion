@@ -166,6 +166,7 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A core crate imports a render crate | `core-imports-render` |
 | The gabion runtime depends on an app feature | `framework-purity` |
 | A crate depends on a host | `host-dependency` |
+| The framework growing a default theme, components or a stylesheet | `framework-ui`: the framework ships no UI. A look belongs to the app, in a `*-shared` design-system crate. |
 | `std::fs`, `std::net`, `std::thread`, `std::time`, `std::env`, `std::process` in `*-core` | `disallowed_types` / `disallowed_methods` deny. The wasm target does not catch these. |
 | `tokio`, `axum`, `reqwest`, `sqlx` in a `*-core` manifest | `core-runtime-dep` |
 | A `pub use` glob in an `*-api` contract | `contract-glob` |
@@ -188,6 +189,20 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A long file, a deep function, a wide signature | `file-length` 400, `too-many-branches` 10, cognitive complexity 15, 80 lines, 6 arguments |
 | A `TODO`, `FIXME`, or `XXX` | `no-todo` |
 | Unused dependencies, bad licenses, advisories | `cargo shear`, `cargo deny`. A missing tool is a named failure, or a named SKIP with `--allow-missing-tools` — never silence. |
+
+## The look belongs to the app
+
+The framework ships no components, no tokens and no default theme — `framework-ui`
+fails the gate if a framework crate starts to render. A design system is an
+app-level crate, named `*-shared` so the edge table lets every `*-render` crate and
+every host use it and lets it depend on the runtime only. The examples' one lives in
+`example/shared/ui-shared`: tokens as CSS, `Surface`, `Heading`, `Action`, `Empty`,
+`Failure`, `Notice`. Replace the file; nothing in the framework reads it.
+
+That shape is deliberate. Features live inside an app, so a feature's render crate
+may use its app's kit — which is why composing two features on one screen produces
+one look. A component library meant to travel between *apps* would need headless
+components and a theme parameter, and that is a different product.
 
 ## One core, every surface
 
@@ -314,12 +329,13 @@ What it proves that the todo example cannot:
 - **The gate's own gaps are closed.** `over-broad-visibility`, `axum-outside-host`,
   `unserved-contract`, `no-wasm-proof`, `--fix` for mechanical findings, missing
   tools reported as a named SKIP, and `tests/` scanned by the shape rules.
-- **UIs compose and look alike.** `render -> render` is allowed, so two features can
-  share a screen; the wall moved to `over-broad-visibility`, which holds a render
-  crate to "`pub` means a component another feature may mount". Panels take props
-  (data from `*-api` plus callbacks), not service handles; `example/shared/ui-shared`
-  holds the tokens and the shared panel states, so two panels on one page look like
-  one app; and each published panel has a committed HTML snapshot.
+- **UIs compose, and the look is the app's.** `render -> render` is allowed, so two
+  features can share a screen; the wall moved to `over-broad-visibility`, which holds
+  a render crate to "`pub` means a component another feature may mount". Panels take
+  props (data from `*-api` plus callbacks), not service handles, and each published
+  panel has a committed HTML snapshot. The design system is app-level: the examples
+  keep theirs in `example/shared/ui-shared`, and `framework-ui` fails the gate if the
+  framework itself ever grows a component, a token or a stylesheet.
 - **The board is playable, not a screenshot.** Add a watch, sweep what is due,
   probe one now, evaluate outages, and watch uptime move — every button is a
   call on one of the two contracts, and the render crate still names no core.

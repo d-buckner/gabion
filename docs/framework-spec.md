@@ -19,8 +19,10 @@ call — generated from one definition. All four are built (§5).
 
 ## 2. Non-goals (v1)
 
-- Not a UI framework. The renderer is pluggable; Dioxus is the recommended default
-  (only mature native+wasm UI stack). [OPEN: confirm renderer-agnostic vs bundled]
+- Not a UI framework, and not a design system. The framework ships no components, no
+  tokens and no styles (`framework-ui` enforces it); Dioxus is what the examples use,
+  because it is the only mature native+wasm stack. [OPEN: confirm renderer-agnostic vs
+  bundled]
 - No streaming/SSE surfaces in v1 (contract shape reserved for it).
 - No mobile targets.
 - Not a web framework replacement: axum/rmcp/clap are used internally, not rebuilt.

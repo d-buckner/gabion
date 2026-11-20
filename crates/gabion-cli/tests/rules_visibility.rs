@@ -264,6 +264,55 @@ fn a_workspace_with_no_core_cannot_prove_the_wasm_wall() {
     assert!(hit.fix.contains("feature add"), "{}", hit.fix);
 }
 
+/// The framework ships no UI: a design system belongs to the app. A default look in
+/// the runtime is a house style every app would inherit, so a `framework-crates`
+/// member that renders is a finding.
+#[test]
+fn the_framework_may_not_carry_ui() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", "pub trait X {}\n"),
+            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            ("x-core/src/lib.rs", "pub struct C;\nimpl C {}\n"),
+            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
+            ("host-x/src/lib.rs", "fn main() { let _ = x_core::C; }\n"),
+        ],
+    );
+    // Mark `x-core` as a framework crate: the rule only applies to those.
+    let manifest = std::fs::read_to_string(tmp.path().join("Cargo.toml")).unwrap();
+    std::fs::write(
+        tmp.path().join("Cargo.toml"),
+        manifest.replace("framework-crates = []", "framework-crates = [\"x-core\"]"),
+    )
+    .unwrap();
+
+    let clean = summary(tmp.path());
+    assert!(
+        !clean.findings.iter().any(|f| f.rule == "framework-ui"),
+        "a framework crate with no UI is fine"
+    );
+
+    // Now it renders.
+    std::fs::write(
+        tmp.path().join("x-core/src/lib.rs"),
+        "pub struct C;\nimpl C {}\npub const STYLE: &str = \"font-family: serif\";\n",
+    )
+    .unwrap();
+    let found = summary(tmp.path());
+    let hit = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "framework-ui")
+        .expect("a framework crate carrying styles must be named");
+    assert!(hit.detail.contains("font-family"), "{}", hit.detail);
+    assert!(hit.fix.contains("*-shared"), "{}", hit.fix);
+}
+
 /// A `*-core` that implements nothing is a placeholder: it compiles for wasm and
 /// proves nothing about business logic, while the gate reports the wall as held.
 #[test]
