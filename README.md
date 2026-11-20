@@ -2,9 +2,9 @@
 
 # gabion
 
-**One business core, every surface — and a wall that blocks the shortcuts.**
+**One business core, every surface, and a wall that blocks the shortcuts.**
 
-For codebases a lot of people — and agents — will write into.
+For codebases a lot of people and agents will write into.
 
 [![CI](https://github.com/d-buckner/gabion/actions/workflows/ci.yml/badge.svg)](https://github.com/d-buckner/gabion/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -26,7 +26,7 @@ every surface from it: HTTP, CLI, MCP and a typed client.
 Every feature is split into `*-api`, `*-core` and `*-render` crates, and the crate
 graph enforces the boundaries instead of a linter: a render crate cannot import a
 core crate, and one feature cannot reach into another's internals. Because the
-compiler does the enforcing, there is no rule to forget and no lint to disable —
+compiler does the enforcing, there is no rule to forget and no lint to disable,
 which is what makes the codebase safe to hand to an agent. The shortcuts do not
 compile, so the slop does not pile up.
 
@@ -45,9 +45,9 @@ It takes the shortest path that compiles. So the shortest path has to be the
 correct path.
 
 A style guide cannot enforce that, and a reviewer cannot enforce it at the rate an
-agent produces code. What is needed is a block, not advice — and the block has to
-catch something a normal check would pass, because the damaging change is not a
-typo. It is a plausible shortcut that satisfies every standard check.
+agent produces code. What is needed is a block, not advice. It has to catch
+something a normal check would pass, because the damaging change is not a typo.
+It is a plausible shortcut that satisfies every standard check.
 
 ## Demo
 
@@ -80,8 +80,8 @@ gabion check: PASS (15 steps: config, graph, edges, clippy.toml, workspace lints
   surfaces, sources, fmt, clippy, test, shear, deny, wasm, wasm, wasm)
 ```
 
-Add `todo-core` to `todo-render`'s dependencies — or delete a ban from
-`clippy.toml`, or add a method nobody reviewed — and the same command says:
+Add `todo-core` to `todo-render`'s dependencies, delete a ban from
+`clippy.toml`, or add a method nobody reviewed, and the same command says:
 
 ```console
 $ cargo run -p gabion-cli -- check --fast
@@ -192,7 +192,7 @@ The wall cannot be negotiated away in a one-line diff: `clippy-config` fails whe
 threshold is raised or a ban deleted, and `effect-home-allow` fails when an
 `#[allow]` appears outside a declared effect home. Every rule has a failing
 fixture in `crates/gabion-cli/tests/`, and `dogfood.rs` runs the gate against this
-repo — a wall that stops biting fails here first.
+repo, so a wall that stops biting fails here first.
 
 [**docs/RULES.md**](docs/RULES.md) has every rule id and the shortcut it seals, and
 the edge table is data an app can tighten without patching the framework.
@@ -220,7 +220,7 @@ pub trait TodoInternals { async fn recompute_stats(&self) -> Result<(), TodoErr>
 
 | Feature | Generated artifact |
 | --- | --- |
-| (default) | `<Feature>Client<H: Http>` — the service trait implemented over `Http`, so a renderer cannot tell a remote impl from a local one |
+| (default) | `<Feature>Client<H: Http>`: the service trait implemented over `Http`, so a renderer cannot tell a remote impl from a local one |
 | `registry` | `mount_on`: a host mounts an impl and gets the routes, the subcommand and the tools |
 | `server` | an axum router, one `POST /api/<feature>.<method>` per method; errors map to status |
 | `server` + `openapi` | an OpenAPI 3.1 document for exactly those routes |
@@ -229,8 +229,8 @@ pub trait TodoInternals { async fn recompute_stats(&self) -> Result<(), TodoErr>
 | `conformance` | one case driven through all four adapters and compared |
 
 Every method takes `ctx: &Ctx` (principal, tenant, trace, cancellation), filled in
-by each surface — HTTP from headers, MCP from `_meta`, the CLI from flags — so
-authorization is representable because the contract can see who is calling.
+by each surface: HTTP from headers, MCP from `_meta`, the CLI from flags.
+Authorization is representable because the contract can see who is calling.
 
 Because there is no annotation to review, the reviewable artifact is the *set*: a
 new operation fails the build until `--update-surfaces` is run and committed.
@@ -259,11 +259,11 @@ example/hosts/host-pulse-{cli,server,native,web}             four hosts, one cor
   wait under a deadline. `TestCaps` runs the ladder on a virtual clock and asserts
   the backoff was 250ms then 500ms; `NativeCaps` calls a real socket.
 - **Four hosts, one core.** CLI, axum server (both routers, `/mcp`,
-  `/openapi.json`), Dioxus desktop, and a wasm board that wires `WebCaps` — js
-  clock, localStorage, `fetch` — so the same cores run in the page and the board
+  `/openapi.json`), Dioxus desktop, and a wasm board that wires `WebCaps` (js
+  clock, localStorage, `fetch`), so the same cores run in the page and the board
   survives a reload.
 - **The board is playable, not a screenshot.** Add a watch, sweep what is due,
-  probe one now, evaluate outages, watch uptime move — every button is a call on
+  probe one now, evaluate outages, watch uptime move. Every button is a call on
   one of the two contracts, and the render crate still names no core.
 - **UIs compose, and the look is the app's.** `render -> render` is allowed, so two
   features can share a screen; panels take props (data from `*-api` plus
@@ -285,7 +285,7 @@ crates/gabion/          runtime: capability traits, Ctx, error model, MCP, regis
 crates/gabion-macros/   #[service]: cli, server, openapi, mcp, client, registry, conformance
 crates/gabion-native/   native caps, the concurrent MCP stdio pump, the axum host router
 crates/gabion-cli/      gabion check (the gate) + new / feature add / dev
-example/features/       todo/ checks/ incidents/ pulse/ — the colocation unit
+example/features/       todo/ checks/ incidents/ pulse/ (colocation unit)
 example/shared/         ui-shared: design tokens, the shared panel states, the app's look
 example/hosts/          host-server | host-native | host-web, and the pulse hosts
 docs/                   the spec, the rulebook, the gap log, the collab proposal
@@ -293,7 +293,7 @@ docs/                   the spec, the rulebook, the gap log, the collab proposal
 
 ## Status
 
-v0.1, path-dependency only — `cargo run -p gabion-cli -- new` points at a checkout
+v0.1, path-dependency only. `cargo run -p gabion-cli -- new` points at a checkout
 with `--gabion-path`. The examples run end to end and `gabion check` is green on
 this repo.
 
@@ -324,17 +324,17 @@ mirror and is where CI currently runs.
 
 ## Docs
 
-- [docs/framework-spec.md](docs/framework-spec.md) — the signed-off decisions
+- [docs/framework-spec.md](docs/framework-spec.md): the signed-off decisions
   behind each wall, and the shortcuts each one seals (also as a
   [single page](docs/framework-spec.html)).
-- [docs/RULES.md](docs/RULES.md) — every rule id, the shortcut it blocks, and how
+- [docs/RULES.md](docs/RULES.md): every rule id, the shortcut it blocks, and how
   to tune the edge table for an app.
-- [docs/SURFACES.md](docs/SURFACES.md) — codegen, wire shape, error mapping, and
+- [docs/SURFACES.md](docs/SURFACES.md): codegen, wire shape, error mapping, and
   the committed surface/OpenAPI/UI snapshots.
-- [docs/STATUS.md](docs/STATUS.md) — what is built, what is not, and the edges of
+- [docs/STATUS.md](docs/STATUS.md): what is built, what is not, and the edges of
   every claim.
-- [docs/GAPS.md](docs/GAPS.md) — the full inspection log, ordered by damage.
-- [docs/local-first-collab.md](docs/local-first-collab.md) — a design proposal for
+- [docs/GAPS.md](docs/GAPS.md): the full inspection log, ordered by damage.
+- [docs/local-first-collab.md](docs/local-first-collab.md): a design proposal for
   optional local-first sync (rooms, presence, CRDT merge). Not implemented.
 
 MIT licensed. See [LICENSE](LICENSE).
