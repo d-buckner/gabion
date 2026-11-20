@@ -46,6 +46,9 @@ impl fmt::Display for Finding {
 
 /// Summary line printed at the end; `ok` is what drives the exit code.
 pub struct Summary {
+    /// Plain lines to print before the findings: what a scaffolding command did,
+    /// and what to run next.
+    pub notes: Vec<String>,
     pub findings: Vec<Finding>,
     /// Names of the steps that ran (e.g. `clippy`, `wasm`).
     pub steps: Vec<String>,
@@ -60,6 +63,9 @@ impl Summary {
     }
 
     pub fn print(&self) {
+        for note in &self.notes {
+            println!("{note}");
+        }
         for finding in &self.findings {
             println!("{finding}\n");
         }

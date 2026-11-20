@@ -11,11 +11,14 @@
 
 pub mod cli;
 pub mod clippy_cfg;
+pub mod commands;
 pub mod config;
+pub mod dev;
 pub mod edges;
 pub mod graph;
 pub mod lint;
 pub mod report;
+pub mod scaffold;
 pub mod source;
 pub mod steps;
 pub mod surfaces;
@@ -68,6 +71,7 @@ pub fn check(opts: &Options) -> Summary {
         Ok(c) => c,
         Err(e) => {
             return Summary {
+                notes: Vec::new(),
                 findings: Vec::new(),
                 steps,
                 failed_steps: vec![format!("config: {e}")],
@@ -78,6 +82,7 @@ pub fn check(opts: &Options) -> Summary {
         Ok(g) => g,
         Err(e) => {
             return Summary {
+                notes: Vec::new(),
                 findings: Vec::new(),
                 steps,
                 failed_steps: vec![format!("graph: {e}")],
@@ -87,6 +92,7 @@ pub fn check(opts: &Options) -> Summary {
 
     if graph.crates.is_empty() {
         return Summary {
+            notes: Vec::new(),
             findings: Vec::new(),
             steps,
             failed_steps: vec![
@@ -121,6 +127,7 @@ pub fn check(opts: &Options) -> Summary {
     }
 
     Summary {
+        notes: Vec::new(),
         findings,
         steps,
         failed_steps,

@@ -19,6 +19,8 @@ pub struct Crate {
     pub is_effect_home: bool,
     /// Workspace-internal dependencies (path deps), by crate name.
     pub ws_deps: Vec<String>,
+    /// Whether this crate produces an executable — what `gabion dev` can run.
+    pub has_bin: bool,
 }
 
 impl Crate {
@@ -134,7 +136,26 @@ fn read_package(pkg: &serde_json::Value, root: &Path, cfg: &Config) -> Option<Cr
         class,
         is_effect_home,
         ws_deps,
+        has_bin: produces_bin(pkg),
     })
+}
+
+/// A crate with a `bin` (or a `cdylib` with a `main`) is something `gabion dev`
+/// can run; a library is not.
+fn produces_bin(pkg: &serde_json::Value) -> bool {
+    pkg.get("targets")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|targets| {
+            targets.iter().any(|t| {
+                t.get("kind")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|kinds| {
+                        kinds
+                            .iter()
+                            .any(|k| k.as_str() == Some("bin") || k.as_str() == Some("example"))
+                    })
+            })
+        })
 }
 
 /// Path dependencies (no registry source) — the edges the wall is made of.
