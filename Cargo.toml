@@ -15,6 +15,7 @@ members = [
     "example/features/pulse/pulse-render",
     "example/hosts/host-native",
     "example/hosts/host-pulse-cli",
+    "example/hosts/host-pulse-native",
     "example/hosts/host-pulse-server",
     "example/hosts/host-pulse-web",
     "example/hosts/host-server",
@@ -79,13 +80,18 @@ serde_json = "1"
 schemars = "1.2"
 thiserror = "2"
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+# `time` is not optional: gabion-native's `Sleep` capability is tokio::time.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 # rustls only, so the native http capability keeps the single-binary promise:
 # no system openssl, no system ca-certificate path to configure.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 clap = "4"
 dioxus = { version = "0.7", default-features = false }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", default-features = false }
+console_error_panic_hook = "0.1"
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"

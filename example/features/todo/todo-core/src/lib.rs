@@ -36,7 +36,7 @@ fn internal() -> TodoErr {
 
 #[async_trait]
 impl<C: Caps> TodoService for TodoServiceImpl<C> {
-    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr> {
+    async fn create(&self, _ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr> {
         if input.title.trim().is_empty() {
             return Err(todo_err(TodoError::EmptyTitle));
         }
@@ -57,7 +57,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
         Ok(todo)
     }
 
-    async fn complete(&self, input: TodoId) -> Result<Todo, TodoErr> {
+    async fn complete(&self, _ctx: &Ctx, input: TodoId) -> Result<Todo, TodoErr> {
         let raw = self
             .caps
             .store()
@@ -77,7 +77,7 @@ impl<C: Caps> TodoService for TodoServiceImpl<C> {
         Ok(todo)
     }
 
-    async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr> {
+    async fn list(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<Todo>, TodoErr> {
         let items = self
             .caps
             .store()
@@ -110,14 +110,20 @@ mod tests {
     async fn create_list_complete() {
         let svc = TodoServiceImpl::new(TestCaps::new());
         let t = svc
-            .create(CreateTodo {
-                title: "milk".into(),
-            })
+            .create(
+                &Ctx::anonymous(),
+                CreateTodo {
+                    title: "milk".into(),
+                },
+            )
             .await
             .unwrap();
         assert!(!t.done);
-        assert_eq!(svc.list(()).await.unwrap().len(), 1);
-        let done = svc.complete(TodoId(t.id.clone())).await.unwrap();
+        assert_eq!(svc.list(&Ctx::anonymous(), ()).await.unwrap().len(), 1);
+        let done = svc
+            .complete(&Ctx::anonymous(), TodoId(t.id.clone()))
+            .await
+            .unwrap();
         assert!(done.done);
     }
 
@@ -125,7 +131,7 @@ mod tests {
     async fn empty_title_is_invalid_input() {
         let svc = TodoServiceImpl::new(TestCaps::new());
         let e = svc
-            .create(CreateTodo { title: "  ".into() })
+            .create(&Ctx::anonymous(), CreateTodo { title: "  ".into() })
             .await
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::InvalidInput);
@@ -135,7 +141,10 @@ mod tests {
     #[tokio::test]
     async fn complete_missing_is_404() {
         let svc = TodoServiceImpl::new(TestCaps::new());
-        let e = svc.complete(TodoId("nope".into())).await.unwrap_err();
+        let e = svc
+            .complete(&Ctx::anonymous(), TodoId("nope".into()))
+            .await
+            .unwrap_err();
         assert_eq!(e.kind.http_status(), 404);
         assert_eq!(e.kind.exit_code(), 3);
     }
@@ -146,11 +155,17 @@ mod tests {
     #[tokio::test]
     async fn two_creates_in_the_same_second_do_not_collide() {
         let svc = TodoServiceImpl::new(TestCaps::new());
-        let a = svc.create(CreateTodo { title: "a".into() }).await.unwrap();
-        let b = svc.create(CreateTodo { title: "b".into() }).await.unwrap();
+        let a = svc
+            .create(&Ctx::anonymous(), CreateTodo { title: "a".into() })
+            .await
+            .unwrap();
+        let b = svc
+            .create(&Ctx::anonymous(), CreateTodo { title: "b".into() })
+            .await
+            .unwrap();
         assert_ne!(a.id, b.id, "ids collided within one clock tick");
         assert_eq!(
-            svc.list(()).await.unwrap().len(),
+            svc.list(&Ctx::anonymous(), ()).await.unwrap().len(),
             2,
             "a record was silently overwritten"
         );
@@ -162,7 +177,7 @@ mod tests {
     async fn ids_are_reproducible_under_test_caps() {
         let make = || async {
             TodoServiceImpl::new(TestCaps::new())
-                .create(CreateTodo { title: "x".into() })
+                .create(&Ctx::anonymous(), CreateTodo { title: "x".into() })
                 .await
                 .unwrap()
                 .id

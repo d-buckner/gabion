@@ -17,7 +17,9 @@ use crate::report::Finding;
 use crate::source::{regions_of, scan_comments, Comment};
 
 mod branches;
-mod rules;
+mod handlers;
+pub mod rules;
+pub mod visibility;
 use branches::branch_rule;
 use rules::{allow_audit, comment_rule, contract_glob_rule, host_logic_rule, silent_default_rule};
 
@@ -34,6 +36,53 @@ pub fn check_crate(krate: &Crate, cfg: &Config) -> Vec<Finding> {
                 "fix the file or remove it from the crate.",
             )),
         }
+    }
+    out.extend(handlers::check(krate));
+    out.extend(check_test_files(krate, cfg));
+    out
+}
+
+/// `tests/` and `examples/` are scanned too, but by a *subset* of the rules.
+///
+/// They ship nowhere, so the structural walls (the comment rule, silent defaults,
+/// effect bans, contract globs, host purity) do not apply — and applying them was
+/// why these files were skipped, which left TODO markers, 900-line test files and
+/// unbounded branch nests unchecked in the one place an agent writes the most
+/// code. What does apply is the shape a reviewer has to read anyway: file length,
+/// branch caps, TODOs, and `#[allow]` placement — with the whole file treated as a
+/// test region, because an integration test is one.
+fn check_test_files(krate: &Crate, cfg: &Config) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for path in krate.test_files() {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let lines = content.lines().count();
+        if lines > cfg.max_file_lines {
+            out.push(Finding::new(
+                "file-length",
+                krate.at(&path, 1),
+                format!("{lines} lines, limit is {}", cfg.max_file_lines),
+                "a test file this long is a test suite in one file; split it along what it drives.",
+            ));
+        }
+        let comments = scan_comments(&content);
+        out.extend(no_todo(krate, &path, &comments));
+        let Ok(file) = syn::parse_file(&content) else {
+            out.push(Finding::new(
+                "unparsed-source",
+                krate.at(&path, 1),
+                "syn cannot parse this test file",
+                "gabion's source rules cannot see an unparsed file; fix the syntax.",
+            ));
+            continue;
+        };
+        let regions = crate::source::Regions {
+            test: vec![(1, lines + 1)],
+            generated: Vec::new(),
+        };
+        out.extend(allow_audit(krate, &path, &file, &regions));
+        out.extend(branch_rule(krate, &path, &file, cfg.max_branches));
     }
     out
 }

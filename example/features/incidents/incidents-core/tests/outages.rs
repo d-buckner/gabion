@@ -7,7 +7,7 @@
 use checks_api::{
     check_err, Check, CheckErr, CheckError, CheckId, CheckReport, CheckService, NewCheck, Probe,
 };
-use gabion::prelude::{async_trait, ErrorKind};
+use gabion::prelude::{async_trait, Ctx, ErrorKind};
 use gabion::testing::TestCaps;
 use incidents_api::{Incident, IncidentService};
 use incidents_core::IncidentServiceImpl;
@@ -20,11 +20,11 @@ struct Stub {
 
 #[async_trait]
 impl CheckService for Stub {
-    async fn add(&self, _input: NewCheck) -> Result<Check, CheckErr> {
+    async fn add(&self, _ctx: &Ctx, _input: NewCheck) -> Result<Check, CheckErr> {
         unreachable!("incidents never adds a watch")
     }
 
-    async fn list(&self, _input: ()) -> Result<Vec<CheckReport>, CheckErr> {
+    async fn list(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<CheckReport>, CheckErr> {
         Ok(vec![CheckReport {
             check: Check {
                 id: ID.into(),
@@ -38,15 +38,15 @@ impl CheckService for Stub {
         }])
     }
 
-    async fn probe(&self, _input: CheckId) -> Result<Probe, CheckErr> {
+    async fn probe(&self, _ctx: &Ctx, _input: CheckId) -> Result<Probe, CheckErr> {
         unreachable!("incidents never probes")
     }
 
-    async fn sweep(&self, _input: ()) -> Result<Vec<Probe>, CheckErr> {
+    async fn sweep(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<Probe>, CheckErr> {
         unreachable!("incidents never sweeps")
     }
 
-    async fn history(&self, input: CheckId) -> Result<Vec<Probe>, CheckErr> {
+    async fn history(&self, _ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr> {
         if input.0 != ID {
             return Err(check_err(CheckError::NotFound));
         }
@@ -76,7 +76,10 @@ fn service(caps: &TestCaps, history: &[Probe]) -> IncidentServiceImpl<TestCaps, 
 }
 
 async fn evaluate(caps: &TestCaps, history: &[Probe]) -> Vec<Incident> {
-    service(caps, history).evaluate(()).await.unwrap()
+    service(caps, history)
+        .evaluate(&Ctx::anonymous(), ())
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -126,7 +129,14 @@ async fn the_same_outage_does_not_open_twice() {
         evaluate(&caps, &down).await.is_empty(),
         "a second look at the same outage must not double-count it"
     );
-    assert_eq!(service(&caps, &[]).list(()).await.unwrap().len(), 1);
+    assert_eq!(
+        service(&caps, &[])
+            .list(&Ctx::anonymous(), ())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -167,7 +177,10 @@ async fn open_incidents_come_before_closed_ones() {
         ],
     )
     .await;
-    let all = service(&caps, &[]).list(()).await.unwrap();
+    let all = service(&caps, &[])
+        .list(&Ctx::anonymous(), ())
+        .await
+        .unwrap();
     assert_eq!(all.len(), 1);
     assert!(all[0].closed_at.is_none());
 }
@@ -182,7 +195,7 @@ async fn uptime_counts_the_window() {
         probe(40, true, ""),
     ];
     let uptime = service(&caps, &history)
-        .uptime(CheckId(ID.into()))
+        .uptime(&Ctx::anonymous(), CheckId(ID.into()))
         .await
         .unwrap();
     assert_eq!(uptime.probes, 4);
@@ -196,7 +209,7 @@ async fn uptime_counts_the_window() {
 async fn a_watch_with_no_history_has_no_uptime() {
     let caps = TestCaps::new();
     let uptime = service(&caps, &[])
-        .uptime(CheckId(ID.into()))
+        .uptime(&Ctx::anonymous(), CheckId(ID.into()))
         .await
         .unwrap();
     assert_eq!(uptime.pct, 0);
@@ -207,7 +220,7 @@ async fn a_watch_with_no_history_has_no_uptime() {
 async fn a_neighbour_404_stays_a_404() {
     let caps = TestCaps::new();
     let err = service(&caps, &[])
-        .uptime(CheckId("unknown".into()))
+        .uptime(&Ctx::anonymous(), CheckId("unknown".into()))
         .await
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);

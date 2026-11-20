@@ -44,7 +44,7 @@ async fn serve() -> (String, gabion_native::NativeCaps) {
 async fn a_core_call_over_http_reaches_the_generated_route() {
     let (base, caps) = serve().await;
 
-    let created = call(&caps, &base, "/todo/create").await.unwrap();
+    let created = call(&caps, &base, "/api/todo.create").await.unwrap();
 
     assert_eq!(created.title, "buy sandspice");
     assert!(!created.done);
@@ -54,7 +54,7 @@ async fn a_core_call_over_http_reaches_the_generated_route() {
 async fn a_missing_route_comes_back_as_a_status_the_caller_can_read() {
     let (base, caps) = serve().await;
 
-    let err = call(&caps, &base, "/todo/nope")
+    let err = call(&caps, &base, "/api/todo.nope")
         .await
         .expect_err("a call to a missing route must fail");
 

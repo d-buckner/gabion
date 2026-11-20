@@ -123,6 +123,11 @@ fn default_required_bans() -> Vec<String> {
         "std::process::id",
         "std::fs::read_to_string",
         "std::fs::write",
+        "std::fs::metadata",
+        "std::fs::copy",
+        "std::fs::canonicalize",
+        "std::fs::OpenOptions::open",
+        "std::net::TcpListener",
     ]
     .iter()
     .map(|s| (*s).to_string())

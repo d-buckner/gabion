@@ -51,16 +51,20 @@ fn every_op_has_a_path_and_the_shared_error() {
         (
             "checks",
             &[
-                "/check/add",
-                "/check/list",
-                "/check/probe",
-                "/check/sweep",
-                "/check/history",
+                "/api/check.add",
+                "/api/check.list",
+                "/api/check.probe",
+                "/api/check.sweep",
+                "/api/check.history",
             ],
         ),
         (
             "incidents",
-            &["/incident/evaluate", "/incident/list", "/incident/uptime"],
+            &[
+                "/api/incident.evaluate",
+                "/api/incident.list",
+                "/api/incident.uptime",
+            ],
         ),
     ];
     for (name, paths) in expected {
@@ -148,11 +152,11 @@ fn every_ref_resolves() {
 fn method_docs_reach_the_document() {
     let doc = document("checks");
     assert_eq!(
-        doc["paths"]["/check/add"]["post"]["summary"],
+        doc["paths"]["/api/check.add"]["post"]["summary"],
         "Start watching a URL. Fails with `InvalidUrl` unless it is http or https."
     );
     assert!(
-        doc["paths"]["/check/list"]["post"]
+        doc["paths"]["/api/check.list"]["post"]
             .get("description")
             .is_none(),
         "a one-line doc must not be written twice"

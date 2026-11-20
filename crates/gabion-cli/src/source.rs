@@ -61,6 +61,18 @@ pub fn scan_comments(content: &str) -> Vec<Comment> {
     out
 }
 
+/// A whole-word-ish mention: `HELPER` inside `HELPERS` is a different name, and a
+/// substring match would call an unused item used.
+#[must_use]
+pub fn mentions(text: &str, name: &str) -> bool {
+    text.match_indices(name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + name.len()..].chars().next();
+        !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+            && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
 pub(crate) fn line_of(span: proc_macro2::Span) -> usize {
     span.start().line
 }

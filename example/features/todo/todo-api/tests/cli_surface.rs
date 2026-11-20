@@ -8,7 +8,7 @@ use gabion::prelude::*;
 /// A success value whose `Serialize` impl always fails. The generated dispatch
 /// used to swallow that error: empty stdout and exit code 0, which reads as a
 /// successful call to every caller, script, and agent in the chain.
-#[derive(JsonSchema)]
+#[derive(JsonSchema, Deserialize)]
 pub struct Broken;
 
 impl gabion::serde::Serialize for Broken {
@@ -19,16 +19,29 @@ impl gabion::serde::Serialize for Broken {
     }
 }
 
+/// The probe service's own error. The generated client needs `FromWire` on it,
+/// which is the compiler demanding an answer for a remote failure.
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub enum ProbeError {
+    Broken,
+}
+
+impl FromWire for ProbeError {
+    fn from_wire(_wire: WireError) -> Self {
+        ProbeError::Broken
+    }
+}
+
 #[service]
 pub trait ProbeService {
-    async fn read(&self, _input: ()) -> Result<Broken, ServiceError<()>>;
+    async fn read(&self, ctx: &Ctx, _input: ()) -> Result<Broken, ServiceError<ProbeError>>;
 }
 
 pub struct Probe;
 
 #[async_trait]
 impl ProbeService for Probe {
-    async fn read(&self, _input: ()) -> Result<Broken, ServiceError<()>> {
+    async fn read(&self, _ctx: &Ctx, _input: ()) -> Result<Broken, ServiceError<ProbeError>> {
         Ok(Broken)
     }
 }
@@ -36,9 +49,14 @@ impl ProbeService for Probe {
 #[test]
 fn a_success_value_that_will_not_serialize_fails_the_call() {
     let matches = __probe_cli::probe_cli_command().get_matches_from(["probe", "read"]);
-    let outcome = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(__probe_cli::probe_cli_dispatch(&Probe, &matches));
+    let outcome =
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(__probe_cli::probe_cli_dispatch(
+                &Probe,
+                &Ctx::anonymous(),
+                &matches,
+            ));
     match outcome {
         Ok(text) => panic!("a value that cannot serialize must not look like success: {text:?}"),
         Err(e) => {

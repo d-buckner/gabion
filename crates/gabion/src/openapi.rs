@@ -142,7 +142,7 @@ mod tests {
         let mut api = OpenApi::new("TodoService", "0.1.0", "todo");
         api.error_response(ref_schema("WireError"));
         api.post(Route {
-            path: "/todo/create",
+            path: "/api/todo.create",
             operation_id: "todo_create",
             summary: "Create one todo.",
             description: "Create one todo.\nFails if the title is blank.",
@@ -150,7 +150,7 @@ mod tests {
             response: ref_schema("Todo"),
         });
         api.post(Route {
-            path: "/todo/list",
+            path: "/api/todo.list",
             operation_id: "todo_list",
             summary: "",
             description: "",
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn a_path_carries_its_schema_and_the_shared_error() {
         let doc = doc();
-        let create = &doc["paths"]["/todo/create"]["post"];
+        let create = &doc["paths"]["/api/todo.create"]["post"];
         assert_eq!(create["operationId"], "todo_create");
         assert_eq!(create["tags"], json!(["todo"]));
         assert_eq!(create["summary"], "Create one todo.");
@@ -190,7 +190,7 @@ mod tests {
     /// method has no prose to invent.
     #[test]
     fn a_method_without_input_or_docs_omits_both() {
-        let list = &doc()["paths"]["/todo/list"]["post"];
+        let list = &doc()["paths"]["/api/todo.list"]["post"];
         assert!(list.get("requestBody").is_none(), "{list}");
         assert!(list.get("summary").is_none(), "{list}");
         assert!(list.get("description").is_none(), "{list}");

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
+use gabion::prelude::Ctx;
 use todo_api::{CreateTodo, Todo, TodoErr, TodoId, TodoService};
 
 const CSS: &str = r#"
@@ -36,9 +37,31 @@ li.done span { text-decoration: line-through; opacity: .5; }
 "#;
 
 /// Service handle injected by the host through the launch context
-/// (`LaunchBuilder::with_context`). The UI only ever sees the trait.
+/// (`LaunchBuilder::with_context`). The UI only ever sees the trait — and the
+/// caller identity the host decided on, which travels with the handle so no
+/// screen has to invent one.
 #[derive(Clone)]
-pub struct Svc(pub Arc<dyn TodoService + Send + Sync>);
+pub struct Svc {
+    pub inner: Arc<dyn TodoService + Send + Sync>,
+    pub ctx: Ctx,
+}
+
+impl Svc {
+    /// A screen acting on its own behalf, which is what a local desktop app is.
+    #[must_use]
+    pub fn new(inner: Arc<dyn TodoService + Send + Sync>) -> Self {
+        Self {
+            inner,
+            ctx: Ctx::anonymous(),
+        }
+    }
+
+    /// A screen acting for a caller the host authenticated.
+    #[must_use]
+    pub fn with_ctx(inner: Arc<dyn TodoService + Send + Sync>, ctx: Ctx) -> Self {
+        Self { inner, ctx }
+    }
+}
 
 /// The todo screen. Reads the injected [`Svc`] from context.
 #[component]
@@ -48,8 +71,8 @@ pub fn TodoApp() -> Element {
     let todos = use_resource({
         let svc = svc.clone();
         move || {
-            let svc = svc.0.clone();
-            async move { svc.list(()).await.map_err(|e| e.message) }
+            let svc = svc.clone();
+            async move { svc.inner.list(&svc.ctx, ()).await.map_err(|e| e.message) }
         }
     });
 
@@ -78,7 +101,7 @@ pub fn TodoApp() -> Element {
                                     let svc = svc.clone();
                                     let id = id.clone();
                                     spawn(async move {
-                                        let _ = svc.0.complete(TodoId(id)).await;
+                                        let _ = svc.inner.complete(&svc.ctx, TodoId(id)).await;
                                         refresh(todos);
                                     });
                                 }
@@ -104,7 +127,7 @@ pub fn TodoApp() -> Element {
                         if !text.trim().is_empty() {
                             let svc = svc.clone();
                             spawn(async move {
-                                let _ = svc.0.create(CreateTodo { title: text }).await;
+                                let _ = svc.inner.create(&svc.ctx, CreateTodo { title: text }).await;
                                 refresh(todos);
                             });
                         }
@@ -134,8 +157,11 @@ fn refresh(mut todos: Resource<Result<Vec<Todo>, String>>) {
 }
 
 /// A "view": renders the list via the trait object it was given.
-pub async fn render_list(svc: &(dyn TodoService + Send + Sync)) -> Result<String, TodoErr> {
-    let todos = svc.list(()).await?;
+pub async fn render_list(
+    svc: &(dyn TodoService + Send + Sync),
+    ctx: &Ctx,
+) -> Result<String, TodoErr> {
+    let todos = svc.list(ctx, ()).await?;
     let mut out = String::new();
     for t in todos {
         let mark = if t.done { "x" } else { " " };
@@ -147,17 +173,22 @@ pub async fn render_list(svc: &(dyn TodoService + Send + Sync)) -> Result<String
 /// A "controller": user action -> service call. Same code native and wasm.
 pub async fn on_add_clicked(
     svc: &(dyn TodoService + Send + Sync),
+    ctx: &Ctx,
     title: &str,
 ) -> Result<Todo, TodoErr> {
-    svc.create(CreateTodo {
-        title: title.to_string(),
-    })
+    svc.create(
+        ctx,
+        CreateTodo {
+            title: title.to_string(),
+        },
+    )
     .await
 }
 
 pub async fn on_checkbox_clicked(
     svc: &(dyn TodoService + Send + Sync),
+    ctx: &Ctx,
     id: &str,
 ) -> Result<Todo, TodoErr> {
-    svc.complete(TodoId(id.to_string())).await
+    svc.complete(ctx, TodoId(id.to_string())).await
 }

@@ -36,7 +36,7 @@ fn fix_for(rule: &'static str) -> &'static str {
             "the render crate may name the service *trait* (from *-api) only; the host injects the impl. Never depend on *-core."
         }
         "feature-wall" => {
-            "talk to the other feature through its *-api crate (and the generated client); its core internals are not yours."
+            "talk to the other feature through its *-api crate; the in-process call works today and the generated HTTP client is planned. Its core internals are not yours."
         }
         "contract-purity" => "the contract crate holds wire types and the trait only. Move the type into *-api and let *-core depend on it.",
         "upward-leak" => "shared is below every feature: it may depend on the gabion runtime only.",
@@ -68,8 +68,107 @@ pub fn check(graph: &Graph, cfg: &Config) -> Vec<Finding> {
                 findings.push(f);
             }
         }
+        findings.extend(core_runtime_deps(krate));
     }
     findings
+}
+
+/// External crates a `*-core` may not depend on.
+///
+/// The compile target does not seal these. `std` ships wasm stubs for `fs`,
+/// `net`, `thread` and `time` (they compile and fail at runtime), and tokio's
+/// `rt` feature builds for `wasm32-unknown-unknown` — both verified on the
+/// pinned toolchain. So a core that names a runtime, a server, or an I/O client
+/// would pass the wasm step, and the only mechanical block left is a manifest
+/// read. The list is deliberately enumerated; a crate outside it is not caught
+/// (docs/GAPS.md §3).
+const CORE_BANNED_CRATES: &[&str] = &[
+    // runtimes and executors
+    "tokio",
+    "tokio-util",
+    "async-std",
+    "smol",
+    "async-executor",
+    "rayon",
+    "mio",
+    // servers and their plumbing
+    "axum",
+    "actix-web",
+    "actix-rt",
+    "warp",
+    "rocket",
+    "poem",
+    "tide",
+    "hyper",
+    "hyper-util",
+    "tower",
+    "tower-http",
+    // clients
+    "reqwest",
+    "ureq",
+    "surf",
+    // storage engines
+    "rusqlite",
+    "sqlx",
+    "diesel",
+    "redb",
+    "sled",
+];
+
+/// `[dependencies]` plus every `[target.*.dependencies]` table. Dev-dependencies
+/// are not scanned: they are tests, and tests are effect homes. A target-specific
+/// dependency is scanned because a core may not grow a native-only branch.
+fn core_runtime_deps(krate: &Crate) -> Vec<Finding> {
+    if krate.class != Class::Core {
+        return Vec::new();
+    }
+    let manifest = krate.dir.join("Cargo.toml");
+    let Ok(text) = std::fs::read_to_string(&manifest) else {
+        return vec![Finding::new(
+            "core-runtime-dep",
+            krate.name.clone(),
+            format!("cannot read {}", manifest.display()),
+            "the runtime-dependency audit reads this manifest; fix the path or the file.",
+        )];
+    };
+    let Ok(value) = text.parse::<toml::Value>() else {
+        return vec![Finding::new(
+            "core-runtime-dep",
+            krate.name.clone(),
+            format!("{} does not parse", manifest.display()),
+            "the runtime-dependency audit reads this manifest; fix the syntax.",
+        )];
+    };
+    let mut names = dependency_names(&value);
+    names.sort_unstable();
+    names.dedup();
+    names
+        .into_iter()
+        .filter(|name| CORE_BANNED_CRATES.contains(&name.as_str()))
+        .map(|name| {
+            Finding::new(
+                "core-runtime-dep",
+                format!("{} -> {name}", krate.name),
+                format!("`{}` (core) depends on `{name}`", krate.name),
+                "a core is runtime-free: the runtime, server, or client belongs in the host, or behind a capability impl. The wasm target does not catch this one.",
+            )
+        })
+        .collect()
+}
+
+fn dependency_names(value: &toml::Value) -> Vec<&String> {
+    let mut out: Vec<&String> = Vec::new();
+    if let Some(deps) = value.get("dependencies").and_then(toml::Value::as_table) {
+        out.extend(deps.keys());
+    }
+    if let Some(targets) = value.get("target").and_then(toml::Value::as_table) {
+        for spec in targets.values() {
+            if let Some(deps) = spec.get("dependencies").and_then(toml::Value::as_table) {
+                out.extend(deps.keys());
+            }
+        }
+    }
+    out
 }
 
 fn check_edge(from: &Crate, to: &Crate, cfg: &Config) -> Option<Finding> {

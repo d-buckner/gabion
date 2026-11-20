@@ -10,9 +10,45 @@ pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
     let trait_ident = &c.trait_ident;
     let server_mod = format_ident!("__{}_server", ns);
     let router_fn = format_ident!("{}_router", ns);
-    let exposed = &c.methods;
+    let handlers = gen_handlers(c);
+    let routes = gen_routes(c);
+    let openapi = gen_openapi(c);
 
-    let handlers = exposed.iter().map(|m| {
+    quote! {
+        #[doc(hidden)]
+        #[cfg(feature = "server")]
+        pub mod #server_mod {
+            #![allow(missing_docs, clippy::all, clippy::pedantic)]
+            use super::*;
+            use ::axum::extract::State;
+            use ::axum::response::IntoResponse;
+
+            #[derive(Clone)]
+            pub struct Svc(
+                pub ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
+            );
+
+            #handlers
+
+            /// One POST per method: `POST /<ns>.<method>`.
+            pub fn #router_fn(
+                svc: ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
+            ) -> ::axum::Router {
+                ::axum::Router::new()
+                    #routes
+                    .with_state(Svc(svc))
+            }
+
+            #openapi
+        }
+    }
+}
+
+/// One axum handler per method. Each reads the caller from its headers before it
+/// looks at the body, because a route that parses first and identifies later
+/// gives an anonymous caller a parser.
+fn gen_handlers(c: &Contract) -> proc_macro2::TokenStream {
+    let handlers = c.methods.iter().map(|m| {
         let id = &m.ident;
         let hid = format_ident!("__h_{}", m.snake);
         let parse = match &m.input {
@@ -39,10 +75,18 @@ pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
         quote! {
             async fn #hid(
                 State(Svc(svc)): State<Svc>,
+                headers: ::axum::http::HeaderMap,
                 body: ::axum::body::Bytes,
             ) -> ::axum::response::Response {
+                // The caller is not invented here: the headers the generated
+                // client stamps are the headers this reads.
+                let ctx = ::gabion::ctx::Ctx::from_wire_headers(
+                    headers.iter().filter_map(|(name, value)| {
+                        value.to_str().ok().map(|v| (name.as_str(), v))
+                    }),
+                );
                 #parse
-                match svc.#id(input).await {
+                match svc.#id(&ctx, input).await {
                     Ok(v) => (::axum::http::StatusCode::OK, ::axum::Json(&v)).into_response(),
                     Err(e) => {
                         let status = ::axum::http::StatusCode::from_u16(e.kind.http_status())
@@ -63,43 +107,17 @@ pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
             }
         }
     });
+    quote! { #(#handlers)* }
+}
 
-    let routes = exposed.iter().map(|m| {
+fn gen_routes(c: &Contract) -> proc_macro2::TokenStream {
+    let ns = &c.ns;
+    let routes = c.methods.iter().map(|m| {
         let hid = format_ident!("__h_{}", m.snake);
         let route = route(ns, m);
         quote! { .route(#route, ::axum::routing::post(#hid)) }
     });
-
-    let openapi = gen_openapi(c);
-
-    quote! {
-        #[doc(hidden)]
-        #[cfg(feature = "server")]
-        pub mod #server_mod {
-            #![allow(missing_docs, clippy::all, clippy::pedantic)]
-            use super::*;
-            use ::axum::extract::State;
-            use ::axum::response::IntoResponse;
-
-            #[derive(Clone)]
-            pub struct Svc(
-                pub ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
-            );
-
-            #(#handlers)*
-
-            /// One POST per method: `POST /<ns>.<method>`.
-            pub fn #router_fn(
-                svc: ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
-            ) -> ::axum::Router {
-                ::axum::Router::new()
-                    #(#routes)*
-                    .with_state(Svc(svc))
-            }
-
-            #openapi
-        }
-    }
+    quote! { #(#routes)* }
 }
 
 /// The OpenAPI 3.1 document for the routes above, built from the same types the

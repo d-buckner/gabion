@@ -23,8 +23,8 @@ fn err_of(body: &str) -> String {
 }
 
 const CLEAN: &str = "pub trait TodoService {
-    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
-    async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
+    async fn create(&self, ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr>;
+    async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }";
 
 #[test]
@@ -82,11 +82,48 @@ fn service_takes_no_arguments() {
 fn one_input_argument_is_enforced() {
     let msg = err_of(
         "pub trait S {
-        async fn a(&self, one: A, two: B) -> Result<(), ()>;
+        async fn a(&self, ctx: &Ctx, one: A, two: B) -> Result<(), ()>;
     }",
     );
     assert!(
         msg.contains("exactly one input argument"),
         "expected the arity error, got: {msg}"
     );
+}
+
+#[test]
+fn a_method_without_a_context_is_a_hard_error() {
+    // This is the whole point of the parameter: a method whose surface cannot
+    // name its caller is a method that cannot be authorized.
+    let msg = err_of(
+        "pub trait S {
+        async fn a(&self, input: A) -> Result<(), ()>;
+    }",
+    );
+    assert!(
+        msg.contains("takes `ctx: &Ctx` first"),
+        "expected the missing-ctx error, got: {msg}"
+    );
+}
+
+#[test]
+fn a_qualified_context_type_is_accepted() {
+    // `&gabion::Ctx` and `&crate::Ctx` are the same convention; keying on the
+    // bare spelling would be a wall that depends on how someone imported it.
+    let out = expand_src(
+        "pub trait S {
+        async fn a(&self, ctx: &::gabion::Ctx) -> Result<(), ()>;
+    }",
+    );
+    assert!(out.is_ok(), "a qualified Ctx must expand");
+}
+
+#[test]
+fn a_unit_input_is_still_allowed_after_the_context() {
+    let out = expand_src(
+        "pub trait S {
+        async fn a(&self, ctx: &Ctx, _input: ()) -> Result<(), ()>;
+    }",
+    );
+    assert!(out.is_ok());
 }

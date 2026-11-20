@@ -54,13 +54,18 @@ pub struct CheckReport {
 }
 
 /// One error enum -> HTTP status, CLI exit code, through `ErrorKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum CheckError {
     NotFound,
     InvalidUrl,
     /// A store or serialization failure: the request was fine, the world was
     /// not. Maps to 500 / exit 1 via `ErrorKind`, never hand-mapped.
     Internal,
+    /// A failure that crossed a wire and whose detail this version does not know.
+    Remote {
+        kind: ErrorKind,
+        message: String,
+    },
 }
 
 impl CheckError {
@@ -69,6 +74,7 @@ impl CheckError {
             CheckError::NotFound => ErrorKind::NotFound,
             CheckError::InvalidUrl => ErrorKind::InvalidInput,
             CheckError::Internal => ErrorKind::Internal,
+            CheckError::Remote { kind, .. } => *kind,
         }
     }
 }
@@ -76,25 +82,38 @@ impl CheckError {
 pub type CheckErr = ServiceError<CheckError>;
 
 /// The public contract. **Every method in this trait is generated into every
-/// surface** — CLI subcommand, HTTP route, OpenAPI operation — with no per-method
-/// opt-in or opt-out. The trait is the security boundary: adding a method here
-/// grants it to every caller, including agents.
+/// surface** — CLI subcommand, HTTP route, MCP tool, typed-client method — with
+/// no per-method opt-in or opt-out. The trait is the security boundary: adding a
+/// method here grants it to every caller, including agents.
+///
+/// `ctx` is the caller (spec §10.1), built by whichever surface received the
+/// request.
 #[service]
 pub trait CheckService {
     /// Start watching a URL. Fails with `InvalidUrl` unless it is http or https.
-    async fn add(&self, input: NewCheck) -> Result<Check, CheckErr>;
+    async fn add(&self, ctx: &Ctx, input: NewCheck) -> Result<Check, CheckErr>;
 
     /// Every watch with its most recent observation.
-    async fn list(&self, _input: ()) -> Result<Vec<CheckReport>, CheckErr>;
+    async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<CheckReport>, CheckErr>;
 
     /// Probe one watch now, ignoring the schedule.
-    async fn probe(&self, input: CheckId) -> Result<Probe, CheckErr>;
+    async fn probe(&self, ctx: &Ctx, input: CheckId) -> Result<Probe, CheckErr>;
 
     /// Probe every watch whose interval has elapsed, and return what was probed.
-    async fn sweep(&self, _input: ()) -> Result<Vec<Probe>, CheckErr>;
+    async fn sweep(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Probe>, CheckErr>;
 
     /// Observations for one watch, oldest first.
-    async fn history(&self, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
+    async fn history(&self, ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
+}
+
+/// What a remote failure becomes in this app (see `gabion::error::FromWire`).
+impl FromWire for CheckError {
+    fn from_wire(wire: WireError) -> Self {
+        CheckError::Remote {
+            kind: wire.kind,
+            message: wire.message,
+        }
+    }
 }
 
 /// Constructor helper: builds the wire envelope from a domain error.
@@ -104,6 +123,7 @@ pub fn check_err(detail: CheckError) -> CheckErr {
         CheckError::NotFound => "check not found".to_string(),
         CheckError::InvalidUrl => "url must be http or https".to_string(),
         CheckError::Internal => "storage failed".to_string(),
+        CheckError::Remote { message, .. } => message.clone(),
     };
     ServiceError::new(kind, msg, detail)
 }

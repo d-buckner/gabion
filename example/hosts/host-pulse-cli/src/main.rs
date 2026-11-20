@@ -8,6 +8,7 @@
 use checks_core::CheckServiceImpl;
 use clap::Command;
 use gabion::cli::CliExit;
+use gabion::prelude::Ctx;
 use incidents_core::IncidentServiceImpl;
 use std::process::exit;
 
@@ -28,6 +29,10 @@ async fn main() {
     let checks = CheckServiceImpl::new(caps.clone());
     let incidents = IncidentServiceImpl::new(caps.clone(), CheckServiceImpl::new(caps));
 
+    // A local CLI is its own caller: anonymous unless the generated service
+    // flags (`--principal`, `--tenant`, `--trace`) name someone.
+    let ctx = Ctx::anonymous();
+
     let matches = Command::new("pulse")
         .about("watch URLs, record outages")
         .subcommand(checks_api::__check_cli::check_cli_command())
@@ -35,14 +40,16 @@ async fn main() {
         .get_matches();
 
     let outcome = match matches.subcommand() {
-        Some(("check", sub)) => checks_api::__check_cli::check_cli_dispatch(&checks, sub).await,
-        Some(("incident", sub)) => {
-            incidents_api::__incident_cli::incident_cli_dispatch(&incidents, sub).await
+        Some(("check", sub)) => {
+            checks_api::__check_cli::check_cli_dispatch(&checks, &ctx, sub).await
         }
-        _ => Err(CliExit {
-            code: 2,
-            message: "choose a `check` or `incident` command".to_string(),
-        }),
+        Some(("incident", sub)) => {
+            incidents_api::__incident_cli::incident_cli_dispatch(&incidents, &ctx, sub).await
+        }
+        _ => Err(CliExit::new(
+            gabion::prelude::ErrorKind::InvalidInput,
+            "choose a `check` or `incident` command",
+        )),
     };
 
     match outcome {

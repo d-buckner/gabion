@@ -1,13 +1,15 @@
-# gabion public surface. Every line is reachable over CLI, HTTP,
-# MCP and the typed client. Review changes here like an API change.
-checks-api::CheckService::add
-checks-api::CheckService::history
-checks-api::CheckService::list
-checks-api::CheckService::probe
-checks-api::CheckService::sweep
-incidents-api::IncidentService::evaluate
-incidents-api::IncidentService::list
-incidents-api::IncidentService::uptime
-todo-api::TodoService::complete
-todo-api::TodoService::create
-todo-api::TodoService::list
+# gabion public surface. Every line is one reachable operation, hashed over
+# its signature and the same-crate types it names.
+# Reachable over CLI, HTTP, MCP and the typed client. Review changes here like
+# an API change: a changed hash is a changed input or output.
+checks-api::CheckService::add #a79f826a6cf5f7dc
+checks-api::CheckService::history #de7b9b395e2d964e
+checks-api::CheckService::list #3767d17953d4f167
+checks-api::CheckService::probe #9f6809f12a8df374
+checks-api::CheckService::sweep #8d57a6fc9d995e7b
+incidents-api::IncidentService::evaluate #3054fd6a4b7ffac5
+incidents-api::IncidentService::list #ec17081b925808ac
+incidents-api::IncidentService::uptime #64a7556a1d901e83
+todo-api::TodoService::complete #a2e7ab82fa1092e4
+todo-api::TodoService::create #56b9e8927e6c90ef
+todo-api::TodoService::list #2d23dea4ee2f9f72

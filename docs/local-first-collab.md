@@ -333,7 +333,7 @@ that's always up:
    `Store` — no schema.
 
 Authority model: **no authoritative server.** Every replica is equal; automerge
-converges everyone. The HTTP surface (`POST /todo/create`) still works — it's
+converges everyone. The HTTP surface (`POST /api/todo.create`) still works — it's
 the server replica taking a write, identical to any peer's write. MCP and CLI
 likewise. The four surfaces become "four ways to mutate one replica," which is
 a genuinely elegant sentence and needs no new machinery.

@@ -6,7 +6,7 @@ edition.workspace = true
 publish = false
 license.workspace = true
 authors.workspace = true
-description = "pulse web host (cdylib): proves both features plus the renderer compile to wasm32-unknown-unknown."
+description = "pulse web host (cdylib): both features plus the renderer, over real browser capabilities (js clock, localStorage, crypto, setTimeout, fetch)."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -20,6 +20,19 @@ incidents-core = { path = "../../features/incidents/incidents-core" }
 pulse-render = { path = "../../features/pulse/pulse-render" }
 dioxus = { workspace = true, features = ["web", "launch"] }
 wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { workspace = true, features = [
+    "Crypto",
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Storage",
+    "Window",
+] }
+console_error_panic_hook = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

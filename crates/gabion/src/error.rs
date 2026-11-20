@@ -61,6 +61,20 @@ impl ErrorKind {
             ErrorKind::Internal => 1,
         }
     }
+    /// The inverse of [`ErrorKind::exit_code`], for a caller that only has a
+    /// process status. `None` for a code no surface produces: 0 is success, and
+    /// `2` is deliberately `InvalidInput` because that is what clap uses for a
+    /// usage error too.
+    #[must_use]
+    pub fn from_exit_code(code: i32) -> Option<Self> {
+        match code {
+            1 => Some(ErrorKind::Internal),
+            2 => Some(ErrorKind::InvalidInput),
+            3 => Some(ErrorKind::NotFound),
+            4 => Some(ErrorKind::Conflict),
+            _ => None,
+        }
+    }
 }
 
 /// The in-process error: `E` is the app's own error enum, so nothing is lost
@@ -157,6 +171,43 @@ impl std::fmt::Display for WireError {
 
 impl std::error::Error for WireError {}
 
+/// A type that can be rebuilt from a failure that crossed a wire.
+///
+/// The generated client needs this: a remote call comes back as a flat
+/// [`WireError`], and the client's signature promises the app's own error type.
+/// When the detail on the wire is the shape this version knows, recovery is
+/// total. When it is not — an older server, a newer server, a transport failure
+/// that never had a detail at all — the app still has to answer with *something*
+/// typed, and "something" is a decision only the app can make. So it makes it,
+/// once, in an impl the compiler will demand the moment a client is generated.
+///
+/// ```ignore
+/// impl gabion::error::FromWire for TodoError {
+///     fn from_wire(wire: WireError) -> Self {
+///         TodoError::Remote { kind: wire.kind, message: wire.message }
+///     }
+/// }
+/// ```
+pub trait FromWire: Sized {
+    /// Rebuild the app's error from whatever did arrive.
+    fn from_wire(wire: WireError) -> Self;
+}
+
+/// `ServiceError<E>` is recoverable whenever `E` is: the typed detail is kept
+/// when it parses, and `E::from_wire` supplies the fallback when it does not.
+impl<E: FromWire + serde::de::DeserializeOwned> FromWire for ServiceError<E> {
+    fn from_wire(wire: WireError) -> Self {
+        match wire.into_service_error::<E>() {
+            Ok(typed) => typed,
+            Err(leftover) => ServiceError {
+                kind: leftover.kind,
+                message: leftover.message.clone(),
+                detail: E::from_wire(leftover),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)] // a failing assertion should say which conversion broke
 mod tests {
@@ -220,6 +271,22 @@ mod tests {
         assert_eq!(ErrorKind::NotFound.mcp_code(), -32001);
         assert_eq!(ErrorKind::NotFound.exit_code(), 3);
         assert_eq!(ErrorKind::Internal.exit_code(), 1);
+    }
+
+    /// Every mapping round-trips, so a surface that only has a status can recover
+    /// the kind. A code that no surface produces is `None`, not `Internal`.
+    #[test]
+    fn every_exit_code_maps_back_to_its_kind() {
+        for kind in [
+            ErrorKind::NotFound,
+            ErrorKind::InvalidInput,
+            ErrorKind::Conflict,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(ErrorKind::from_exit_code(kind.exit_code()), Some(kind));
+        }
+        assert_eq!(ErrorKind::from_exit_code(0), None);
+        assert_eq!(ErrorKind::from_exit_code(99), None);
     }
 
     #[test]

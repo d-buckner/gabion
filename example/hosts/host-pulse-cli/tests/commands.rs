@@ -5,7 +5,7 @@
 
 use checks_core::CheckServiceImpl;
 use clap::Command;
-use gabion::prelude::ErrorKind;
+use gabion::prelude::{Ctx, ErrorKind};
 use gabion::testing::TestCaps;
 use incidents_core::IncidentServiceImpl;
 
@@ -27,7 +27,7 @@ async fn a_generated_check_command_prints_the_record_it_made() {
     ]);
     let sub = matches.subcommand().unwrap().1;
 
-    let out = checks_api::__check_cli::check_cli_dispatch(&checks, sub)
+    let out = checks_api::__check_cli::check_cli_dispatch(&checks, &Ctx::anonymous(), sub)
         .await
         .unwrap();
     assert!(out.contains("\"name\": \"api\""), "{out}");
@@ -42,7 +42,7 @@ async fn an_unknown_id_exits_with_the_code_the_error_enum_maps_to() {
     let matches = pulse().get_matches_from(["pulse", "check", "probe", "--json", r#""nope""#]);
     let sub = matches.subcommand().unwrap().1;
 
-    let err = checks_api::__check_cli::check_cli_dispatch(&checks, sub)
+    let err = checks_api::__check_cli::check_cli_dispatch(&checks, &Ctx::anonymous(), sub)
         .await
         .expect_err("a missing watch must not exit 0");
     assert_eq!(err.code, ErrorKind::NotFound.exit_code());
@@ -64,13 +64,18 @@ async fn a_sweep_and_an_evaluate_over_the_cli() {
         "--json",
         r#"{"name":"cdn","url":"http://cdn.internal/health"}"#,
     ]);
-    checks_api::__check_cli::check_cli_dispatch(&checks, add.subcommand().unwrap().1)
-        .await
-        .unwrap();
+    checks_api::__check_cli::check_cli_dispatch(
+        &checks,
+        &Ctx::anonymous(),
+        add.subcommand().unwrap().1,
+    )
+    .await
+    .unwrap();
 
     for _ in 0..2 {
         checks_api::__check_cli::check_cli_dispatch(
             &checks,
+            &Ctx::anonymous(),
             pulse()
                 .get_matches_from(["pulse", "check", "sweep"])
                 .subcommand()
@@ -85,6 +90,7 @@ async fn a_sweep_and_an_evaluate_over_the_cli() {
     let evaluate = pulse().get_matches_from(["pulse", "incident", "evaluate"]);
     let out = incidents_api::__incident_cli::incident_cli_dispatch(
         &incidents,
+        &Ctx::anonymous(),
         evaluate.subcommand().unwrap().1,
     )
     .await

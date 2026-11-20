@@ -180,7 +180,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/check/add": {
+    "/api/check.add": {
       "post": {
         "operationId": "check_add",
         "requestBody": {
@@ -214,7 +214,7 @@
         ]
       }
     },
-    "/check/history": {
+    "/api/check.history": {
       "post": {
         "operationId": "check_history",
         "requestBody": {
@@ -251,7 +251,7 @@
         ]
       }
     },
-    "/check/list": {
+    "/api/check.list": {
       "post": {
         "operationId": "check_list",
         "responses": {
@@ -278,7 +278,7 @@
         ]
       }
     },
-    "/check/probe": {
+    "/api/check.probe": {
       "post": {
         "operationId": "check_probe",
         "requestBody": {
@@ -312,7 +312,7 @@
         ]
       }
     },
-    "/check/sweep": {
+    "/api/check.sweep": {
       "post": {
         "operationId": "check_sweep",
         "responses": {

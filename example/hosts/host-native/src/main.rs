@@ -11,6 +11,9 @@ use todo_api::TodoService;
 use todo_core::TodoServiceImpl;
 
 fn main() {
+    // The host decides who its calls are for. A desktop app with no login is
+    // anonymous; the generated CLI flags can still name a caller per call.
+    let ctx = gabion::prelude::Ctx::anonymous();
     let caps = gabion_native::FileCaps::new(
         std::env::var("MYAPP_STORE").unwrap_or_else(|_| "myapp.store.json".into()),
     )
@@ -30,7 +33,7 @@ fn main() {
     // GUI path: Dioxus owns its async runtime, so launch OUTSIDE any tokio rt.
     if matches.subcommand_matches("gui").is_some() {
         dioxus::LaunchBuilder::new()
-            .with_context(todo_render::Svc(dynsvc))
+            .with_context(todo_render::Svc::new(dynsvc))
             .with_cfg(
                 dioxus::desktop::Config::new()
                     .with_window(dioxus::desktop::WindowBuilder::new().with_title("myapp")),
@@ -50,13 +53,12 @@ fn main() {
 
     let result: Result<String, gabion::cli::CliExit> = rt.block_on(async {
         match matches.subcommand() {
-            Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref())
+            Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref(), &ctx)
                 .await
-                .map_err(|e| gabion::cli::CliExit {
-                    code: e.kind.exit_code(),
-                    message: e.message,
-                }),
-            Some(("todo", m)) => todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), m).await,
+                .map_err(|e| gabion::cli::CliExit::from_service(&e)),
+            Some(("todo", m)) => {
+                todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), &ctx, m).await
+            }
             _ => {
                 cmd.print_help().ok();
                 std::process::exit(0);

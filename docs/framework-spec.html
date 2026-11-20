@@ -89,6 +89,11 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--border);color
 </style>
 </head>
 <body>
+<div style="max-width:60rem;margin:0 auto;padding:1rem 1.5rem;background:#3a2a12;color:#ffd9a0;font:14px/1.5 ui-sans-serif,system-ui,sans-serif;border-bottom:1px solid #6b4c1d">
+  <strong>Snapshot, not the spec.</strong> This page is an early design summary.
+  <a style="color:#ffd9a0" href="framework-spec.md">docs/framework-spec.md</a> is
+  authoritative, including what is built and what is only decided or planned.
+</div>
 <div class="layout">
 <nav id="nav">
   <div class="brand">fw<span>·</span>spec</div>
@@ -215,7 +220,7 @@ flowchart TB
 
 <div class="callout">
   <span class="tag">Registration without wiring</span>
-  <code>#[service]</code> registers each impl via <code>linkme</code> distributed-slice; hosts auto-collect routes / tools / subcommands with zero manual registration. An agent adds a feature folder and it appears in all four surfaces. <code>fw check</code> audits the Cargo.toml edge table, so a hand-added forbidden dep — the agent "shortcut" — fails CI with a message naming the wall rule violated. DTOs live in <code>*-api</code>, not <code>*-core</code>: put one in core and render gets an immediate compile error pointing at the wall — the error message is the documentation.
+  <code>#[service]</code> emits <code>mount_on</code> on the trait object, so a host writes <code>checks.mount_on(&amp;mut host)</code> and gets the routes, the subcommand and the tools with zero manual registration. (The first version used a <code>linkme</code> distributed slice; it was measured <em>empty</em> in a real host binary, because the linker may drop the object file holding an rlib static — GAPS §1. The method form cannot be silently absent, and it works on wasm.) An agent adds a feature folder and it appears in all four surfaces. <code>fw check</code> audits the Cargo.toml edge table, so a hand-added forbidden dep — the agent "shortcut" — fails CI with a message naming the wall rule violated. DTOs live in <code>*-api</code>, not <code>*-core</code>: put one in core and render gets an immediate compile error pointing at the wall — the error message is the documentation.
 </div>
 </section>
 
@@ -263,13 +268,15 @@ flowchart LR
 <p><code>#[service]</code> generates, feature-gated so each host compiles only what it needs:</p>
 <table>
 <tr><th>Feature</th><th>Generated artifact</th><th>Used by</th></tr>
-<tr><td><code>(default)</code></td><td>wire types + <code>TodoServiceClient</code> trait + <code>Http</code> impl (fetch-based, wasm-safe)</td><td>render, web</td></tr>
-<tr><td><code>inproc</code></td><td><code>InProcess</code> client impl (direct call, zero serialization)</td><td>native host</td></tr>
+<tr><td><code>(default)</code></td><td><code>TodoClient&lt;H: Http&gt;</code>: the service trait implemented over <code>Http</code> (wasm-safe)</td><td>render, web</td></tr>
+<tr><td><code>registry</code></td><td><code>mount_on</code> on the trait object</td><td>every host</td></tr>
 <tr><td><code>server</code></td><td>axum routes + OpenAPI 3.1 doc</td><td>server host</td></tr>
-<tr><td><code>mcp</code></td><td>rmcp tool definitions (schemas from JsonSchema)</td><td>server host</td></tr>
+<tr><td><code>mcp</code></td><td>one JSON-RPC tool per method (schemas from JsonSchema, inlined)</td><td>server host</td></tr>
 <tr><td><code>cli</code></td><td>clap subcommand mapping</td><td>native host</td></tr>
+<tr><td><code>conformance</code></td><td><code>&lt;ns&gt;_conformance</code>: one case through all four adapters, compared</td><td>tests</td></tr>
 </table>
-<p>The renderer calls <code>client.create(input)</code>. On native that's an in-process call; on web it's a POST to the server. Same signature, same types, same errors. This is the Dioxus <code>#[server]</code> dual-codegen pattern, generalized to four surfaces and enforced by the crate wall.</p>
+<p>The renderer calls <code>client.create(&amp;ctx, input)</code>. On native that's an in-process call; on web it's a POST to the server. Same signature, same types, same errors, same caller — <code>Ctx</code> is the first parameter of every method, and each surface fills it in. The in-process surface needs no generated code: the trait object <em>is</em> the in-process client, so a renderer cannot tell which it was handed. This is the Dioxus <code>#[server]</code> dual-codegen pattern, generalized to four surfaces and enforced by the crate wall.</p>
+<p class="dim">MCP is served by <code>gabion::mcp</code> (JSON-RPC 2.0 over stdio and <code>POST /mcp</code>) rather than <code>rmcp</code>: the three methods this framework uses are the three it has to test, and the error mapping — <code>ErrorKind</code> to JSON-RPC code — is the interesting part. No SSE stream in v1.</p>
 <p class="dim">Wire format: JSON, one POST per method (<code>POST /api/todo.create</code>), args as body, <code>Result&lt;T, E&gt;</code> envelope. OpenAPI exported from the same source for public API docs and external codegen. <span class="warn">[OPEN: CBOR/MessagePack option for wasm payload size]</span></p>
 </section>
 
@@ -341,7 +348,8 @@ flowchart TB
 <p class="dim">Verification, not generation, is the bottleneck (Tan). Agents prove work by execution, not review.</p>
 <ul>
   <li>Core is pure → deterministic unit tests with <code>MockCaps</code> (fixed clock, in-memory store).</li>
-  <li>Generated conformance suite: the same <code>TodoServiceImpl</code> is driven through all four adapters (clap invocation, axum test request, rmcp tool call, in-proc client) and must agree on outputs.</li>
+  <li>Generated conformance suite: one case is driven through all four adapters (in-proc, clap dispatch, MCP tool call, generated client over a socket) and the four answers are compared — including the failure envelope, so an adapter that drops the kind or the detail fails. A case the suite cannot drive is a rejection, not a pass. It cannot compare a <em>create</em>: two calls are two creates, so the cases are the ones a repeat answers the same way.</li>
+  <li><code>fw check</code> closes its own gaps: <code>over-broad-visibility</code>, <code>axum-outside-host</code>, <code>unserved-contract</code>, <code>no-wasm-proof</code>, a signature hash in the surface lock, <code>tests/</code> scanned by the shape rules, and <code>--fix</code> for the findings that carry an exact text edit.</li>
 </ul>
 <div class="diagram">
 <pre class="mermaid">
@@ -384,7 +392,7 @@ fw-cli/        # `fw new`, `fw dev` (native+server+web hot reload), `fw check`</
 <ol class="steps">
   <li><b>Spike the walls.</b> Hand-write two features (todo, billing) × api/core/render + one host. Prove: render cannot import core, todo-core cannot import billing-core, and the wasm build of a core fails on <code>std::time</code>.</li>
   <li><b>Spike <code>#[service]</code> v0.</b> Macro generating just the axum router + clap from the trait (skip mcp/client first). Prove one fn → two surfaces compiles.</li>
-  <li><b>Add rmcp + Http client stub.</b> Add <code>fw check</code>.</li>
+  <li><b>Add rmcp + Http client stub.</b> Add <code>fw check</code>. Done, with one deviation: the MCP surface and the HTTP client are built, on <code>gabion::mcp</code> rather than <code>rmcp</code>.</li>
   <li><b>Only then:</b> <code>fw new</code> scaffolding + Dioxus template.</li>
 </ol>
 </section>
