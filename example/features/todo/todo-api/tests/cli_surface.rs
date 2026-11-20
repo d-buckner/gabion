@@ -21,14 +21,14 @@ impl gabion::serde::Serialize for Broken {
 
 #[service]
 pub trait ProbeService {
-    async fn read(&self, _input: ()) -> Result<Broken, ServiceError<()>>;
+    async fn read(&self, ctx: &Ctx, _input: ()) -> Result<Broken, ServiceError<()>>;
 }
 
 pub struct Probe;
 
 #[async_trait]
 impl ProbeService for Probe {
-    async fn read(&self, _input: ()) -> Result<Broken, ServiceError<()>> {
+    async fn read(&self, _ctx: &Ctx, _input: ()) -> Result<Broken, ServiceError<()>> {
         Ok(Broken)
     }
 }
@@ -36,9 +36,14 @@ impl ProbeService for Probe {
 #[test]
 fn a_success_value_that_will_not_serialize_fails_the_call() {
     let matches = __probe_cli::probe_cli_command().get_matches_from(["probe", "read"]);
-    let outcome = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(__probe_cli::probe_cli_dispatch(&Probe, &matches));
+    let outcome =
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(__probe_cli::probe_cli_dispatch(
+                &Probe,
+                &Ctx::anonymous(),
+                &matches,
+            ));
     match outcome {
         Ok(text) => panic!("a value that cannot serialize must not look like success: {text:?}"),
         Err(e) => {

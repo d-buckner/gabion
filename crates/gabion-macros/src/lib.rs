@@ -128,11 +128,12 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
-/// Parse the trait's methods and enforce the one-input-argument convention.
+/// Parse the trait's methods and enforce the calling convention: `&Ctx` first,
+/// then at most one input argument.
 ///
-/// The retired per-method surface attributes are a hard error rather than a
-/// silent no-op: an app that still writes them must learn about it at the call
-/// site, not after a route it thought was hidden turns out to be public.
+/// The context is required rather than optional on purpose. A method without one
+/// is a method whose surface cannot say who called it, and the surfaces are
+/// generated, not written — so the only place to catch that is here.
 fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
     let mut methods = Vec::new();
     for item in cleaned.items.iter_mut() {
@@ -140,18 +141,39 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
         reject_retired_surface_attrs(m)?;
 
         let mut input_ty: Option<Type> = None;
+        let mut seen_ctx = false;
         for arg in m.sig.inputs.iter() {
             let syn::FnArg::Typed(pt) = arg else { continue };
+            if !seen_ctx {
+                if !is_ctx(&pt.ty) {
+                    return Err(syn::Error::new_spanned(
+                        &pt.ty,
+                        "every #[service] method takes `ctx: &Ctx` first:\n\n    \
+                         async fn create(&self, ctx: &Ctx, input: T) -> Result<R, E>\n\n\
+                         A call has a caller. The generated surfaces fill this in (HTTP reads its \
+                         headers, MCP its `_meta`, the CLI its flags), and a method that does not \
+                         take one can never be told who is calling.",
+                    ));
+                }
+                seen_ctx = true;
+                continue;
+            }
             if input_ty.is_some() {
                 return Err(syn::Error::new_spanned(
                     pt,
-                    "#[service] methods take exactly one input argument (use `()` for none)",
+                    "#[service] methods take `&Ctx` and exactly one input argument (use `()` for none)",
                 ));
             }
             let is_unit = matches!(&*pt.ty, Type::Tuple(t) if t.elems.is_empty());
             if !is_unit {
                 input_ty = Some((*pt.ty).clone());
             }
+        }
+        if !seen_ctx {
+            return Err(syn::Error::new_spanned(
+                &m.sig.ident,
+                "every #[service] method takes `ctx: &Ctx` first: `async fn name(&self, ctx: &Ctx, input: T)`",
+            ));
         }
 
         let (summary, description) = doc_summary(&m.attrs);
@@ -167,23 +189,52 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
     Ok(methods)
 }
 
+/// `&Ctx`, `&gabion::Ctx`, `&crate::Ctx`: the type's last segment is what the
+/// convention is about, since a contract may import or fully qualify it.
+fn is_ctx(ty: &Type) -> bool {
+    let Type::Reference(r) = ty else {
+        return false;
+    };
+    let Type::Path(p) = &*r.elem else {
+        return false;
+    };
+    p.path.segments.last().is_some_and(|seg| seg.ident == "Ctx")
+}
+
 /// Pull the `T` out of `Result<T, E>`; anything else is its own `T`.
 fn ok_type(output: &syn::ReturnType) -> Type {
-    let syn::ReturnType::Type(_, ty) = output else {
-        return syn::parse_quote!(());
-    };
-    if let Type::Path(p) = &**ty {
-        if let Some(last) = p.path.segments.last() {
-            if last.ident == "Result" {
-                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
-                    if let Some(syn::GenericArgument::Type(ok)) = args.args.first() {
-                        return ok.clone();
-                    }
-                }
-            }
-        }
+    result_args(output).map_or_else(|| whole_or_unit(output), |(ok, _)| ok)
+}
+
+fn whole_or_unit(output: &syn::ReturnType) -> Type {
+    match output {
+        syn::ReturnType::Type(_, ty) => (**ty).clone(),
+        syn::ReturnType::Default => syn::parse_quote!(()),
     }
-    (**ty).clone()
+}
+
+/// `Result<T, E>` -> `(T, Some(E))`; `Result<T>` -> `(T, None)`. Every other
+/// return type is not a `Result` at all.
+fn result_args(output: &syn::ReturnType) -> Option<(Type, Option<Type>)> {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return None;
+    };
+    let Type::Path(p) = &**ty else {
+        return None;
+    };
+    let last = p.path.segments.last()?;
+    if last.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    let mut types = args.args.iter().filter_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t.clone()),
+        _ => None,
+    });
+    let ok = types.next()?;
+    Some((ok, types.next()))
 }
 
 /// The method's doc comment, split into a one-line summary and the rest. The

@@ -11,6 +11,9 @@ description = "pulse status UI. Depends on the two api crates ONLY — no core i
 [dependencies]
 checks-api = { path = "../../checks/checks-api" }
 incidents-api = { path = "../../incidents/incidents-api" }
+# The runtime, for the types a screen carries: `Ctx` travels with the injected
+# handle so every call the UI makes is identified. No core, still.
+gabion = { workspace = true }
 # Dioxus core + signals only — NO renderer feature here. The host picks the
 # renderer, so this crate stays dual-target native + wasm.
 dioxus = { workspace = true, default-features = false, features = ["macro", "html", "signals", "hooks"] }

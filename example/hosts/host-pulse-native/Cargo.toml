@@ -13,6 +13,7 @@ name = "pulse-gui"
 path = "src/main.rs"
 
 [dependencies]
+gabion = { workspace = true }
 gabion-native = { workspace = true }
 checks-api = { path = "../../features/checks/checks-api" }
 incidents-api = { path = "../../features/incidents/incidents-api" }

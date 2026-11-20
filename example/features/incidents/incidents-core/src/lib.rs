@@ -131,13 +131,13 @@ impl<C: Caps, S: CheckService> IncidentServiceImpl<C, S> {
 
 #[async_trait]
 impl<C: Caps, S: CheckService + Sync> IncidentService for IncidentServiceImpl<C, S> {
-    async fn evaluate(&self, _input: ()) -> Result<Vec<Incident>, IncidentErr> {
+    async fn evaluate(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Incident>, IncidentErr> {
         let mut changed = Vec::new();
-        for report in self.checks.list(()).await.map_err(Self::forward)? {
+        for report in self.checks.list(ctx, ()).await.map_err(Self::forward)? {
             let id = report.check.id.clone();
             let history = self
                 .checks
-                .history(CheckId(id))
+                .history(ctx, CheckId(id))
                 .await
                 .map_err(Self::forward)?;
             match self.open_one(&report.check.id).await? {
@@ -156,7 +156,7 @@ impl<C: Caps, S: CheckService + Sync> IncidentService for IncidentServiceImpl<C,
         Ok(changed)
     }
 
-    async fn list(&self, _input: ()) -> Result<Vec<Incident>, IncidentErr> {
+    async fn list(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<Incident>, IncidentErr> {
         let mut all = self.all().await?;
         all.sort_by(|a, b| {
             a.closed_at
@@ -167,9 +167,13 @@ impl<C: Caps, S: CheckService + Sync> IncidentService for IncidentServiceImpl<C,
         Ok(all)
     }
 
-    async fn uptime(&self, input: CheckId) -> Result<Uptime, IncidentErr> {
+    async fn uptime(&self, ctx: &Ctx, input: CheckId) -> Result<Uptime, IncidentErr> {
         let check_id = input.0.clone();
-        let history = self.checks.history(input).await.map_err(Self::forward)?;
+        let history = self
+            .checks
+            .history(ctx, input)
+            .await
+            .map_err(Self::forward)?;
         let window: Vec<&Probe> = history.iter().rev().take(WINDOW).collect();
         let probes = window.len();
         let ok = window.iter().filter(|p| p.ok).count();

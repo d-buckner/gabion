@@ -56,20 +56,23 @@ impl IncidentError {
 pub type IncidentErr = ServiceError<IncidentError>;
 
 /// The public contract. **Every method in this trait is generated into every
-/// surface** — CLI subcommand, HTTP route, OpenAPI operation — with no per-method
-/// opt-in or opt-out. The trait is the security boundary: adding a method here
-/// grants it to every caller, including agents.
+/// surface** — CLI subcommand, HTTP route, MCP tool, typed-client method — with
+/// no per-method opt-in or opt-out. The trait is the security boundary: adding a
+/// method here grants it to every caller, including agents.
+///
+/// `ctx` is the caller (spec §10.1), built by whichever surface received the
+/// request.
 #[service]
 pub trait IncidentService {
     /// Read what the watches saw and open or close incidents to match. Returns
     /// the incidents this call changed.
-    async fn evaluate(&self, _input: ()) -> Result<Vec<Incident>, IncidentErr>;
+    async fn evaluate(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Incident>, IncidentErr>;
 
     /// Every incident, open ones first, newest first within each group.
-    async fn list(&self, _input: ()) -> Result<Vec<Incident>, IncidentErr>;
+    async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Incident>, IncidentErr>;
 
     /// Share of one watch's recent probes that came back.
-    async fn uptime(&self, input: CheckId) -> Result<Uptime, IncidentErr>;
+    async fn uptime(&self, ctx: &Ctx, input: CheckId) -> Result<Uptime, IncidentErr>;
 }
 
 /// Constructor helper: builds the wire envelope from a domain error.

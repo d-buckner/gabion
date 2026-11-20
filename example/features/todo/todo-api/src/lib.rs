@@ -46,16 +46,20 @@ pub type TodoErr = ServiceError<TodoError>;
 /// no per-method opt-in or opt-out. That makes the trait itself the security
 /// boundary: adding a method here grants it to every caller, including agents.
 /// An op that must not be remote does not belong in this trait.
+///
+/// `ctx` is the caller (spec §10.1): the generated surfaces build it from the
+/// request they received, so an op can tell who called it without a task-local
+/// and without trusting a global.
 #[service]
 pub trait TodoService {
     /// Add one todo. Fails with `EmptyTitle` when the title is blank.
-    async fn create(&self, input: CreateTodo) -> Result<Todo, TodoErr>;
+    async fn create(&self, ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr>;
 
     /// Mark one todo done. Fails with `NotFound` when the id is unknown.
-    async fn complete(&self, input: TodoId) -> Result<Todo, TodoErr>;
+    async fn complete(&self, ctx: &Ctx, input: TodoId) -> Result<Todo, TodoErr>;
 
     /// Every todo, in the order they were created.
-    async fn list(&self, _input: ()) -> Result<Vec<Todo>, TodoErr>;
+    async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }
 
 /// The middle rung of the ladder: reachable in-proc from another feature

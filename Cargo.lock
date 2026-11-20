@@ -2384,6 +2384,7 @@ dependencies = [
  "checks-api",
  "checks-core",
  "dioxus",
+ "gabion",
  "gabion-native",
  "incidents-api",
  "incidents-core",
@@ -2430,6 +2431,7 @@ name = "host-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "clap",
  "gabion",
  "gabion-native",
  "serde_json",
@@ -4090,6 +4092,7 @@ version = "0.1.0"
 dependencies = [
  "checks-api",
  "dioxus",
+ "gabion",
  "incidents-api",
 ]
 
@@ -5393,6 +5396,7 @@ name = "todo-render"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "gabion",
  "todo-api",
 ]
 

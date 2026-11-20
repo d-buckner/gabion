@@ -13,6 +13,7 @@
 use checks_api::{CheckService, NewCheck};
 use checks_core::CheckServiceImpl;
 use gabion::caps::Caps;
+use gabion::prelude::Ctx;
 use incidents_api::IncidentService;
 use incidents_core::IncidentServiceImpl;
 use std::sync::Arc;
@@ -47,16 +48,20 @@ fn services<C: Caps>(caps: C) -> Board {
 }
 
 async fn seed(checks: &dyn CheckService) {
-    let empty = checks.list(()).await.map(|items| items.is_empty());
+    let ctx = Ctx::anonymous();
+    let empty = checks.list(&ctx, ()).await.map(|items| items.is_empty());
     if !matches!(empty, Ok(true)) {
         return;
     }
     for (name, url) in DEMO_WATCHES {
         let _ = checks
-            .add(NewCheck {
-                name: name.into(),
-                url: url.into(),
-            })
+            .add(
+                &ctx,
+                NewCheck {
+                    name: name.into(),
+                    url: url.into(),
+                },
+            )
             .await;
     }
 }
@@ -70,10 +75,7 @@ pub fn start() {
         let board = services(WebCaps::new());
         seed(board.checks.as_ref()).await;
         dioxus::LaunchBuilder::new()
-            .with_context(pulse_render::Svc {
-                checks: board.checks,
-                incidents: board.incidents,
-            })
+            .with_context(pulse_render::Svc::new(board.checks, board.incidents))
             .launch(pulse_render::StatusApp);
     });
 }
@@ -84,27 +86,31 @@ pub fn start() {
 /// contract, which reads checks — the same path the browser takes.
 #[allow(clippy::unwrap_used)] // bootstrap path for the demo board, not business logic
 pub async fn board(caps: gabion::testing::TestCaps) -> Vec<(String, bool, u8, bool)> {
+    let ctx = Ctx::anonymous();
     let checks = CheckServiceImpl::new(caps.clone());
     let incidents = IncidentServiceImpl::new(caps.clone(), CheckServiceImpl::new(caps.clone()));
     for (name, url) in DEMO_WATCHES {
         checks
-            .add(NewCheck {
-                name: name.into(),
-                url: url.into(),
-            })
+            .add(
+                &ctx,
+                NewCheck {
+                    name: name.into(),
+                    url: url.into(),
+                },
+            )
             .await
             .unwrap();
     }
-    checks.sweep(()).await.unwrap();
+    checks.sweep(&ctx, ()).await.unwrap();
     caps.time().advance(61_000);
-    checks.sweep(()).await.unwrap();
-    incidents.evaluate(()).await.unwrap();
+    checks.sweep(&ctx, ()).await.unwrap();
+    incidents.evaluate(&ctx, ()).await.unwrap();
 
-    let open = incidents.list(()).await.unwrap();
+    let open = incidents.list(&ctx, ()).await.unwrap();
     let mut rows = Vec::new();
-    for report in checks.list(()).await.unwrap() {
+    for report in checks.list(&ctx, ()).await.unwrap() {
         let uptime = incidents
-            .uptime(checks_api::CheckId(report.check.id.clone()))
+            .uptime(&ctx, checks_api::CheckId(report.check.id.clone()))
             .await
             .unwrap();
         rows.push((

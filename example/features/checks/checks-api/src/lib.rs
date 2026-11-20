@@ -76,25 +76,28 @@ impl CheckError {
 pub type CheckErr = ServiceError<CheckError>;
 
 /// The public contract. **Every method in this trait is generated into every
-/// surface** — CLI subcommand, HTTP route, OpenAPI operation — with no per-method
-/// opt-in or opt-out. The trait is the security boundary: adding a method here
-/// grants it to every caller, including agents.
+/// surface** — CLI subcommand, HTTP route, MCP tool, typed-client method — with
+/// no per-method opt-in or opt-out. The trait is the security boundary: adding a
+/// method here grants it to every caller, including agents.
+///
+/// `ctx` is the caller (spec §10.1), built by whichever surface received the
+/// request.
 #[service]
 pub trait CheckService {
     /// Start watching a URL. Fails with `InvalidUrl` unless it is http or https.
-    async fn add(&self, input: NewCheck) -> Result<Check, CheckErr>;
+    async fn add(&self, ctx: &Ctx, input: NewCheck) -> Result<Check, CheckErr>;
 
     /// Every watch with its most recent observation.
-    async fn list(&self, _input: ()) -> Result<Vec<CheckReport>, CheckErr>;
+    async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<CheckReport>, CheckErr>;
 
     /// Probe one watch now, ignoring the schedule.
-    async fn probe(&self, input: CheckId) -> Result<Probe, CheckErr>;
+    async fn probe(&self, ctx: &Ctx, input: CheckId) -> Result<Probe, CheckErr>;
 
     /// Probe every watch whose interval has elapsed, and return what was probed.
-    async fn sweep(&self, _input: ()) -> Result<Vec<Probe>, CheckErr>;
+    async fn sweep(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Probe>, CheckErr>;
 
     /// Observations for one watch, oldest first.
-    async fn history(&self, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
+    async fn history(&self, ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
 }
 
 /// Constructor helper: builds the wire envelope from a domain error.

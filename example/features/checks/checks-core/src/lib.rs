@@ -204,7 +204,7 @@ impl<C: Caps> CheckServiceImpl<C> {
 
 #[async_trait]
 impl<C: Caps> CheckService for CheckServiceImpl<C> {
-    async fn add(&self, input: NewCheck) -> Result<Check, CheckErr> {
+    async fn add(&self, _ctx: &Ctx, input: NewCheck) -> Result<Check, CheckErr> {
         let scheme_ok = input.url.starts_with("http://") || input.url.starts_with("https://");
         if !scheme_ok {
             return Err(check_err(CheckError::InvalidUrl));
@@ -231,18 +231,18 @@ impl<C: Caps> CheckService for CheckServiceImpl<C> {
         Ok(check)
     }
 
-    async fn list(&self, _input: ()) -> Result<Vec<CheckReport>, CheckErr> {
+    async fn list(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<CheckReport>, CheckErr> {
         self.reports().await
     }
 
-    async fn probe(&self, input: CheckId) -> Result<Probe, CheckErr> {
+    async fn probe(&self, _ctx: &Ctx, input: CheckId) -> Result<Probe, CheckErr> {
         let check = self.load(&input.0).await?;
         let probe = self.run_probe(&check).await;
         self.record(&probe).await?;
         Ok(probe)
     }
 
-    async fn sweep(&self, _input: ()) -> Result<Vec<Probe>, CheckErr> {
+    async fn sweep(&self, _ctx: &Ctx, _input: ()) -> Result<Vec<Probe>, CheckErr> {
         let now = self.caps.clock().now().await.0;
         let mut out = Vec::new();
         for report in self.reports().await? {
@@ -260,7 +260,7 @@ impl<C: Caps> CheckService for CheckServiceImpl<C> {
         Ok(out)
     }
 
-    async fn history(&self, input: CheckId) -> Result<Vec<Probe>, CheckErr> {
+    async fn history(&self, _ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr> {
         self.load(&input.0).await?;
         self.observations(&input.0).await
     }

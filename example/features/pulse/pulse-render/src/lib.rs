@@ -15,6 +15,7 @@
 
 use checks_api::{CheckId, CheckService, NewCheck};
 use dioxus::prelude::*;
+use gabion::prelude::Ctx;
 use incidents_api::IncidentService;
 use std::future::Future;
 use std::sync::Arc;
@@ -80,6 +81,23 @@ ul.outages .when { opacity: .5; margin-left: auto; font-variant-numeric: tabular
 pub struct Svc {
     pub checks: Arc<dyn CheckService + Send + Sync>,
     pub incidents: Arc<dyn IncidentService + Send + Sync>,
+    /// The caller this board acts as. Travels with the handle so every button
+    /// on the screen makes an identified call, not an anonymous one.
+    pub ctx: Ctx,
+}
+
+impl Svc {
+    #[must_use]
+    pub fn new(
+        checks: Arc<dyn CheckService + Send + Sync>,
+        incidents: Arc<dyn IncidentService + Send + Sync>,
+    ) -> Self {
+        Self {
+            checks,
+            incidents,
+            ctx: Ctx::anonymous(),
+        }
+    }
 }
 
 /// Signals the actions touch: bump `version` to re-run the loader, and post the
@@ -111,8 +129,16 @@ where
 }
 
 async fn sweep_and_evaluate(svc: Svc) -> Result<String, String> {
-    let probed = svc.checks.sweep(()).await.map_err(|e| e.message)?;
-    let changed = svc.incidents.evaluate(()).await.map_err(|e| e.message)?;
+    let probed = svc
+        .checks
+        .sweep(&svc.ctx, ())
+        .await
+        .map_err(|e| e.message)?;
+    let changed = svc
+        .incidents
+        .evaluate(&svc.ctx, ())
+        .await
+        .map_err(|e| e.message)?;
     Ok(format!(
         "probed {}, {} incident change(s)",
         probed.len(),
@@ -125,8 +151,16 @@ pub(crate) async fn probe_and_evaluate(
     id: String,
     name: String,
 ) -> Result<String, String> {
-    let probe = svc.checks.probe(CheckId(id)).await.map_err(|e| e.message)?;
-    let changed = svc.incidents.evaluate(()).await.map_err(|e| e.message)?;
+    let probe = svc
+        .checks
+        .probe(&svc.ctx, CheckId(id))
+        .await
+        .map_err(|e| e.message)?;
+    let changed = svc
+        .incidents
+        .evaluate(&svc.ctx, ())
+        .await
+        .map_err(|e| e.message)?;
     let verdict = if probe.ok {
         format!(
             "{} answered {}{}",
@@ -174,7 +208,11 @@ pub fn StatusApp() -> Element {
         let svc = evaluate_svc.clone();
         act(
             async move {
-                let changed = svc.incidents.evaluate(()).await.map_err(|e| e.message)?;
+                let changed = svc
+                    .incidents
+                    .evaluate(&svc.ctx, ())
+                    .await
+                    .map_err(|e| e.message)?;
                 Ok(format!("{} incident change(s)", changed.len()))
             },
             ui,
@@ -194,10 +232,13 @@ pub fn StatusApp() -> Element {
         act(
             async move {
                 svc.checks
-                    .add(NewCheck {
-                        name: form_name.clone(),
-                        url: form_url,
-                    })
+                    .add(
+                        &svc.ctx,
+                        NewCheck {
+                            name: form_name.clone(),
+                            url: form_url,
+                        },
+                    )
                     .await
                     .map_err(|e| e.message)?;
                 Ok(format!("watching {form_name}"))

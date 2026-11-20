@@ -22,13 +22,17 @@ pub(crate) struct Board {
 }
 
 pub(crate) async fn load(svc: &Svc) -> Result<Board, String> {
-    let reports = svc.checks.list(()).await.map_err(|e| e.message)?;
-    let incidents = svc.incidents.list(()).await.map_err(|e| e.message)?;
+    let reports = svc.checks.list(&svc.ctx, ()).await.map_err(|e| e.message)?;
+    let incidents = svc
+        .incidents
+        .list(&svc.ctx, ())
+        .await
+        .map_err(|e| e.message)?;
     let mut rows = Vec::with_capacity(reports.len());
     for report in reports {
         let uptime = svc
             .incidents
-            .uptime(CheckId(report.check.id.clone()))
+            .uptime(&svc.ctx, CheckId(report.check.id.clone()))
             .await
             .ok();
         let open = incidents

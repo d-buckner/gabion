@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use checks_api::{CheckId, CheckService, NewCheck};
 use checks_core::CheckServiceImpl;
+use gabion::prelude::Ctx;
 
 /// A server with one healthy route and one that is melting.
 async fn target() -> String {
@@ -31,18 +32,22 @@ async fn dead_port() -> String {
 
 #[tokio::test]
 async fn a_live_route_that_answers_is_recorded_as_up() {
+    let ctx = Ctx::anonymous();
     let base = target().await;
     let caps = gabion_native::NativeCaps::new();
     let svc = CheckServiceImpl::new(caps);
     let check = svc
-        .add(NewCheck {
-            name: "target".into(),
-            url: format!("{base}/health"),
-        })
+        .add(
+            &ctx,
+            NewCheck {
+                name: "target".into(),
+                url: format!("{base}/health"),
+            },
+        )
         .await
         .unwrap();
 
-    let probe = svc.probe(CheckId(check.id)).await.unwrap();
+    let probe = svc.probe(&ctx, CheckId(check.id)).await.unwrap();
     assert!(probe.ok, "a live 200 must read as up: {:?}", probe);
     assert_eq!(probe.status, 200);
     assert_eq!(probe.attempts, 1);
@@ -52,18 +57,22 @@ async fn a_live_route_that_answers_is_recorded_as_up() {
 /// would hide it behind three waits.
 #[tokio::test]
 async fn a_live_route_that_melts_is_recorded_once() {
+    let ctx = Ctx::anonymous();
     let base = target().await;
     let caps = gabion_native::NativeCaps::new();
     let svc = CheckServiceImpl::new(caps);
     let check = svc
-        .add(NewCheck {
-            name: "melted".into(),
-            url: format!("{base}/melted"),
-        })
+        .add(
+            &ctx,
+            NewCheck {
+                name: "melted".into(),
+                url: format!("{base}/melted"),
+            },
+        )
         .await
         .unwrap();
 
-    let probe = svc.probe(CheckId(check.id)).await.unwrap();
+    let probe = svc.probe(&ctx, CheckId(check.id)).await.unwrap();
     assert!(!probe.ok);
     assert_eq!(probe.status, 503);
     assert_eq!(probe.attempts, 1);
@@ -74,18 +83,22 @@ async fn a_live_route_that_melts_is_recorded_once() {
 /// tries and records the miss with the reason.
 #[tokio::test]
 async fn a_port_nobody_listens_on_is_a_miss_after_the_ladder() {
+    let ctx = Ctx::anonymous();
     let base = dead_port().await;
     let caps = gabion_native::NativeCaps::new();
     let svc = CheckServiceImpl::new(caps);
     let check = svc
-        .add(NewCheck {
-            name: "dead".into(),
-            url: base,
-        })
+        .add(
+            &ctx,
+            NewCheck {
+                name: "dead".into(),
+                url: base,
+            },
+        )
         .await
         .unwrap();
 
-    let probe = svc.probe(CheckId(check.id)).await.unwrap();
+    let probe = svc.probe(&ctx, CheckId(check.id)).await.unwrap();
     assert!(!probe.ok);
     assert_eq!(probe.status, 0);
     assert_eq!(probe.attempts, 3);

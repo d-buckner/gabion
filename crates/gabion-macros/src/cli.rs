@@ -5,6 +5,26 @@ use quote::{format_ident, quote};
 
 use crate::Contract;
 
+/// Global identity flags on the service command. They exist so a local caller
+/// can say who it is without a hand-written adapter: the surface builds the same
+/// `Ctx` every other surface builds.
+fn ctx_args() -> proc_macro2::TokenStream {
+    quote! {
+        .arg(
+            ::clap::Arg::new("principal").long("principal").global(true)
+                .help("caller identity carried into every op on this service"),
+        )
+        .arg(
+            ::clap::Arg::new("tenant").long("tenant").global(true)
+                .help("tenant the call is scoped to"),
+        )
+        .arg(
+            ::clap::Arg::new("trace").long("trace").global(true)
+                .help("trace id carried into every op on this service"),
+        )
+    }
+}
+
 /// clap subcommand tree + async dispatch, error enum -> exit code.
 pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
     let ns = &c.ns;
@@ -14,6 +34,7 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
     let cli_command_fn = format_ident!("{}_cli_command", ns);
     let cli_dispatch_fn = format_ident!("{}_cli_dispatch", ns);
     let exposed = &c.methods;
+    let ctx_args = ctx_args();
 
     let subcommands = exposed.iter().map(|m| {
         let name = m.snake.to_string();
@@ -38,10 +59,10 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
                     let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
                         ::gabion::cli::CliExit { code: 2, message: format!("bad --json: {e}") }
                     })?;
-                    svc.#id(input).await
+                    svc.#id(&ctx, input).await
                 }
             },
-            None => quote! { svc.#id(()).await },
+            None => quote! { svc.#id(&ctx, ()).await },
         };
         quote! {
             Some((#name, sm)) => #call
@@ -63,14 +84,30 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
             /// clap subcommand tree for this service.
             pub fn #cli_command_fn() -> ::clap::Command {
                 ::clap::Command::new(#ns).about(concat!("", stringify!(#trait_name), " operations"))
+                    #ctx_args
                     .subcommands([#(#subcommands),*])
             }
 
             /// Dispatch a matched subcommand against the service.
+            ///
+            /// `base` is the context the host built (usually anonymous); the
+            /// service's own `--principal` / `--tenant` / `--trace` flags narrow
+            /// it, so a caller that names itself is not silently anonymous.
             pub async fn #cli_dispatch_fn(
                 svc: &(dyn #trait_ident + Send + Sync),
+                base: &::gabion::ctx::Ctx,
                 m: &::clap::ArgMatches,
             ) -> ::core::result::Result<String, ::gabion::cli::CliExit> {
+                let mut ctx = base.clone();
+                if let Some(v) = m.get_one::<String>("principal") {
+                    ctx = ctx.with_principal(v.clone());
+                }
+                if let Some(v) = m.get_one::<String>("tenant") {
+                    ctx = ctx.with_tenant(v.clone());
+                }
+                if let Some(v) = m.get_one::<String>("trace") {
+                    ctx = ctx.with_trace(v.clone());
+                }
                 match m.subcommand() {
                     #(#dispatch_arms)*
                     _ => Err(::gabion::cli::CliExit {

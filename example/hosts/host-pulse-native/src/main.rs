@@ -10,6 +10,7 @@
 
 use checks_api::{CheckService, NewCheck};
 use checks_core::CheckServiceImpl;
+use gabion::prelude::Ctx;
 use gabion_native::FileCaps;
 use incidents_api::IncidentService;
 use incidents_core::IncidentServiceImpl;
@@ -38,16 +39,20 @@ fn seed(checks: &CheckServiceImpl<FileCaps>) {
         Err(e) => die(format!("cannot start runtime: {e}")),
     };
     runtime.block_on(async {
-        let empty = checks.list(()).await.map(|items| items.is_empty());
+        let ctx = Ctx::anonymous();
+        let empty = checks.list(&ctx, ()).await.map(|items| items.is_empty());
         if !matches!(empty, Ok(true)) {
             return;
         }
         for (name, url) in DEMO_WATCHES {
             if let Err(e) = checks
-                .add(NewCheck {
-                    name: name.into(),
-                    url: url.into(),
-                })
+                .add(
+                    &ctx,
+                    NewCheck {
+                        name: name.into(),
+                        url: url.into(),
+                    },
+                )
                 .await
             {
                 eprintln!("cannot add demo watch {name}: {}", e.message);
@@ -66,10 +71,10 @@ fn main() {
     seed(&checks);
     let incidents = IncidentServiceImpl::new(caps.clone(), CheckServiceImpl::new(caps));
 
-    let svc = pulse_render::Svc {
-        checks: Arc::new(checks) as Arc<dyn CheckService + Send + Sync>,
-        incidents: Arc::new(incidents) as Arc<dyn IncidentService + Send + Sync>,
-    };
+    let svc = pulse_render::Svc::new(
+        Arc::new(checks) as Arc<dyn CheckService + Send + Sync>,
+        Arc::new(incidents) as Arc<dyn IncidentService + Send + Sync>,
+    );
 
     // Dioxus owns its async runtime, so the window launches outside one. The
     // capability bundle's timers and http client run on the runtime Dioxus

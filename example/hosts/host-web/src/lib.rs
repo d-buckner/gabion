@@ -4,6 +4,7 @@
 //! `cargo build -p host-web --target wasm32-unknown-unknown` must pass.
 
 use gabion::caps::{Caps, Timestamp};
+use gabion::prelude::Ctx;
 use gabion::testing::{InMemoryStore, MockClock, MockHttp, MockRandom, MockSleep};
 use std::sync::Arc;
 use todo_api::TodoService;
@@ -48,7 +49,7 @@ impl Caps for WasmCaps {
 pub fn start() {
     let svc: Arc<dyn TodoService + Send + Sync> = Arc::new(TodoServiceImpl::new(wasm_caps()));
     dioxus::LaunchBuilder::new()
-        .with_context(todo_render::Svc(svc))
+        .with_context(todo_render::Svc::new(svc))
         .launch(todo_render::TodoApp);
 }
 
@@ -69,6 +70,8 @@ fn wasm_caps() -> WasmCaps {
 pub async fn demo() -> String {
     let caps = wasm_caps();
     let svc = TodoServiceImpl::new(caps);
-    let _ = todo_render::on_add_clicked(&svc, "buy sandspice").await;
-    todo_render::render_list(&svc).await.unwrap_or_default()
+    let _ = todo_render::on_add_clicked(&svc, &Ctx::anonymous(), "buy sandspice").await;
+    todo_render::render_list(&svc, &Ctx::anonymous())
+        .await
+        .unwrap_or_default()
 }
