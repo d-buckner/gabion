@@ -212,11 +212,13 @@ flowchart TB
 <tr><td><code>X-api</code></td><td>fw, shared, other features' <code>*-api</code></td></tr>
 <tr><td><code>X-core</code></td><td>X-api, shared, other features' <code>*-api</code></td></tr>
 <tr><td><code>X-render</code></td><td>X-api, shared, ui kit — <span class="bad">NOT any *-core</span></td></tr>
+<tr><td>X-render</td><td>X-api, other features' <code>*-render</code> (components), shared, fw — <span class="bad">never a *-core</span></td></tr>
 <tr><td>hosts</td><td>all <code>*-core</code> + <code>*-render</code> (composition only)</td></tr>
 <tr><td>shared</td><td>fw only — <span class="bad">never any feature</span></td></tr>
 </table>
 
 <p>Cross-feature calls: <code>todo-core</code> may depend on <code>billing-api</code> and receive billing's client (in-proc or HTTP) — never billing's internals. Dune's "features talk through their public surface" rule, made physical.</p>
+<p>The same holds one layer up: <code>todo-render</code> may depend on <code>billing-render</code> and mount its components, never billing's private sub-components — <code>pub</code> in a render crate is the published surface, and <code>over-broad-visibility</code> fails the gate for a public item nothing outside names. Composing two features on one screen is the normal case, so the edge exists; reaching past a feature's components is a finding, so the wall moved rather than disappeared.</p>
 
 <div class="callout">
   <span class="tag">Registration without wiring</span>

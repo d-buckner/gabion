@@ -25,8 +25,6 @@ mod time;
 
 use board::{board_view, latency, load};
 
-pub use time::stamp;
-
 const CSS: &str = r#"
 :root { color-scheme: dark; }
 body { font-family: ui-sans-serif, system-ui, sans-serif; background: #101014;

@@ -49,7 +49,8 @@ ones that remain.
 Two orthogonal walls, both enforced by the crate graph (not lints):
 
 - **Process wall** (Dune: main vs renderer): render <-> core. Render may only
-  import the feature's `api` crate.
+  import the feature's `api` crate — and, for composition, another feature's
+  `render` crate (its published components), never its `core`.
 - **Feature wall** (Dune: feature colocation + cross-feature import ban):
   feature A may import feature B's `api` only — never B's `core` or `render`.
 
@@ -91,7 +92,7 @@ are types-only and fast; cargo parallelizes small crates.
 |------------------|----------------------------------------|
 | X-api            | gabion, shared, other features' *-api      |
 | X-core           | X-api, shared, other features' *-api   |
-| X-render         | X-api, shared, gabion, third-party UI crates — NOT any *-core |
+| X-render         | X-api, other features' *-render (component composition), shared, gabion — NOT any *-core |
 | hosts            | all *-core + *-render (composition only)|
 | shared           | gabion only — never any feature            |
 
@@ -252,6 +253,7 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | Shortcut | Block |
 |---|---|
 | render imports any core | crate graph; unrepresentable (process wall) |
+| a feature UI reaching into another feature's *internals* | `over-broad-visibility`: `pub` in a `*-render` is a published component, and anything no other crate names must be `pub(crate)`. Composing another feature's UI is allowed and expected; reaching past its components is a finding. |
 | feature A imports feature B's core/render | crate graph; unrepresentable (feature wall) |
 | hand-edit Cargo.toml to sneak a forbidden dep | `gabion check` audits every Cargo.toml against the edge table |
 | shared depends on a feature (upward leak) | same edge-table audit |

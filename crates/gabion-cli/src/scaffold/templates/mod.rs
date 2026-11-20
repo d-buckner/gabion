@@ -59,32 +59,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"]
 clap = "4"
 "#;
 
-pub(crate) const README: &str = r#"# %NAME%
-
-A gabion app. One business core (`%FEATURE%`), three crates for it, two hosts.
-
-```sh
-cargo run -p %NAME%-host-server    # http://127.0.0.1:3456
-cargo run -p %NAME%-host-native -- todo list
-cargo run -p gabion-cli -- check   # the gate: one command, one exit code
-```
-
-## The shape
-
-```
-features/%FEATURE%/     %FEATURE%-api | %FEATURE%-core | %FEATURE%-render
-hosts/                  %NAME%-host-server (axum) | %NAME%-host-native (CLI)
-```
-
-`%FEATURE%-render` may name `%FEATURE%-api` and nothing from
-`%FEATURE%-core`: the UI cannot reach the business logic except through the
-contract the host hands it. Adding a method to the `#[service]` trait publishes it
-on every surface at once, which is why `gabion check` locks the reachable set in
-`.gabion/surfaces.lock` — a new op is a diff someone reviews.
-
-Add another feature with `gabion feature add <name>`.
-"#;
-
 pub(crate) const API_MANIFEST: &str = r#"[package]
 name = "%NAME%-%FEATURE%-api"
 version.workspace = true
@@ -385,7 +359,11 @@ pub async fn render_list(svc: &Svc) -> Result<String, %SVC%Err> {
 }
 
 /// A user action: the "controller" layer, which is one call on the contract.
-pub async fn on_add(svc: &Svc, title: &str) -> Result<%SVC%, %SVC%Err> {
+///
+/// `pub(crate)` until something outside this crate composes it: in a render crate
+/// `pub` means "another feature may use this", and `over-broad-visibility` fails
+/// the gate for a public item nothing names.
+pub(crate) async fn on_add(svc: &Svc, title: &str) -> Result<%SVC%, %SVC%Err> {
     svc.inner
         .create(
             &svc.ctx,
@@ -397,4 +375,7 @@ pub async fn on_add(svc: &Svc, title: &str) -> Result<%SVC%, %SVC%Err> {
 }
 "#;
 
+pub(crate) mod docs;
 pub(crate) mod hosts;
+
+pub(crate) use docs::README;

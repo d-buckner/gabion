@@ -138,6 +138,18 @@ config and no way to run it in a browser.
 - **`pub` past the wall.** `over-broad-visibility` + `--fix`; see §3 for the limit.
   Proven by `a_pub_nobody_names_is_over_broad_and_the_fix_applies`, which asserts
   the item a host *does* name is left alone.
+- **Feature UIs could not be composed.** `render-isolation` banned `render ->
+  render`, which made "put two features on one screen" a rule violation and pushed
+  the only legal composition into a crate that had to be hand-waved as not-a-render.
+  The edge is open now, and the wall moved rather than disappeared: `over-broad-
+  visibility` applies to `*-render`, so `pub` means "a component another feature may
+  compose" and everything else is `pub(crate)`. `render -> core` is untouched, so
+  UI composition can never reach business logic, and a cycle between two render
+  crates is still a cargo error. Proven by
+  `a_render_crate_may_compose_another_feature_render` (two feature renders plus a
+  composition root pass) and `a_render_internal_marked_pub_is_a_finding` (a `pub`
+  helper inside one is still a finding). The rule immediately found three
+  published-and-uncalled items in this repo's own examples.
 - **A hand-written HTTP handler.** `axum-outside-host`; see §3 for the limit.
   Proven by `axum_outside_a_host_is_a_finding` (a feature crate is a finding, a
   host crate importing the same path is not, and the framework's own transport is

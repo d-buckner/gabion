@@ -35,12 +35,22 @@ Every feature ships as three crates, not three modules:
 features/todo/
 ├── todo-api/       # wire types + the #[service] trait. Compiles everywhere.
 ├── todo-core/      # the implementation. Pure. No tokio, no std::fs/net/time.
-└── todo-render/    # the UI. Depends on todo-api only.
+└── todo-render/    # the UI. Depends on todo-api (and other features' render
+                    # crates, when composing two features on one screen).
 ```
 
 Cargo only lets a crate `use` what is in its `[dependencies]`. So `todo-render`
 cannot import `todo-core`. The import does not exist. There is no rule to
 forget, no lint to disable, and no reviewer to catch it. The compiler says E0432.
+
+One edge is deliberately open: **`render -> render`**. Composing two features on
+one screen is the normal case, and a feature's UI crate is a library of
+components, so the composition happens at the UI layer instead of being pushed
+into a shell crate that owns nothing. What keeps that from becoming "reach into
+another feature's private components" is `over-broad-visibility`, which holds a
+`*-render` to the same standard as a `*-core`: a `pub` item is a component other
+crates may name, and anything else is `pub(crate)`. A cycle between two render
+crates is still a cargo error, so no crate can sit both below and above another.
 
 The same shape gives the second wall: feature A may depend on feature B's
 `*-api`, never on B's `*-core` or `*-render`. Cross-feature calls go through the
@@ -152,7 +162,7 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A `*-api` crate depends on a core or render crate | `contract-purity` |
 | A host crate implements a service trait | `host-business-logic` |
 | A workspace member gabion cannot classify | `unclassified-crate` |
-| A feature's render crate imports another feature's render crate | `render-isolation` |
+| Composing two features on one screen | Allowed: `render -> render`. The gate's job is the *surface*: a `pub` item in a render crate nothing outside names is `over-broad-visibility`, so composition means "use that feature's components", not "reach into its internals". |
 | A core crate imports a render crate | `core-imports-render` |
 | The gabion runtime depends on an app feature | `framework-purity` |
 | A crate depends on a host | `host-dependency` |

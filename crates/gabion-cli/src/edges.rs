@@ -5,6 +5,16 @@
 //! agent (or a tired human) adds one line to Cargo.toml and the wall is gone.
 //! This module is what closes that gap, and each rule name doubles as the
 //! documentation the violator gets pointed at.
+//!
+//! One edge was deliberately opened: `render -> render`. A feature's UI crate is a
+//! library of components, and composing two features on one screen is the normal
+//! case, not a violation — but the edge only means "use the other feature's
+//! published components" because `over-broad-visibility` applies to `*-render`
+//! too: a `pub` item there is a component meant for other crates, and anything
+//! else is `pub(crate)`. The core walls are untouched: `render -> core` is still a
+//! compile error, so UI composition can never reach business logic, and a cycle
+//! between two render crates is still a cargo error, so no crate can sit below and
+//! above another at once.
 
 use crate::config::{Class, Config};
 use crate::graph::{Crate, Graph};
@@ -22,7 +32,6 @@ fn rule_name(from: Class, to: Class) -> &'static str {
         | (Class::Framework, Class::Render)
         | (Class::Framework, Class::Shared) => "framework-purity",
         (_, Class::Host) => "host-dependency",
-        (Class::Render, Class::Render) => "render-isolation",
         (Class::Core, Class::Render) => "core-imports-render",
         _ => "edge-table",
     }
@@ -42,7 +51,6 @@ fn fix_for(rule: &'static str) -> &'static str {
         "upward-leak" => "shared is below every feature: it may depend on the gabion runtime only.",
         "framework-purity" => "the gabion runtime must stay app-agnostic; move the app-specific code into a feature.",
         "host-dependency" => "hosts are composition roots: nothing may depend on them.",
-        "render-isolation" => "one feature's UI must not reach into another's; expose what you need through *-api.",
         "core-imports-render" => "core is business logic; it must not know a UI exists.",
         _ => "see the allowed-edges table in [workspace.metadata.gabion].",
     }

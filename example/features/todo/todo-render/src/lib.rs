@@ -170,7 +170,8 @@ pub async fn render_list(
     Ok(out)
 }
 
-/// A "controller": user action -> service call. Same code native and wasm.
+/// A "controller": user action -> service call, for a caller that does not hold a
+/// component's props. Same code native and wasm.
 pub async fn on_add_clicked(
     svc: &(dyn TodoService + Send + Sync),
     ctx: &Ctx,
@@ -183,12 +184,4 @@ pub async fn on_add_clicked(
         },
     )
     .await
-}
-
-pub async fn on_checkbox_clicked(
-    svc: &(dyn TodoService + Send + Sync),
-    ctx: &Ctx,
-    id: &str,
-) -> Result<Todo, TodoErr> {
-    svc.complete(ctx, TodoId(id.to_string())).await
 }
