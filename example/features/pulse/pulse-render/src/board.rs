@@ -14,6 +14,8 @@ use checks_api::{CheckId, CheckReport};
 use dioxus::prelude::*;
 use incidents_api::{Incident, Uptime};
 
+use ui_shared::{Action, Empty};
+
 use crate::time::stamp;
 use crate::{act, probe_and_evaluate, Svc, Ui};
 
@@ -144,7 +146,7 @@ fn row_view(row: &CheckRow, on_probe: EventHandler<ProbeRequest>) -> Element {
             td { class: "pct", "{uptime_text(&row.uptime)}" }
             td { {outage} }
             td { class: "act",
-                button { r#type: "button", class: "ghost", onclick, "probe" }
+                Action { label: "probe".to_string(), primary: false, onclick }
             }
         }
     }
@@ -152,7 +154,7 @@ fn row_view(row: &CheckRow, on_probe: EventHandler<ProbeRequest>) -> Element {
 
 fn incidents_view(incidents: &[Incident]) -> Element {
     if incidents.is_empty() {
-        return rsx! { p { class: "muted", "no outages recorded" } };
+        return rsx! { Empty { note: "no outages recorded".to_string() } };
     }
     let items: Vec<Element> = incidents
         .iter()
@@ -202,7 +204,7 @@ pub(crate) fn BoardPanel(
     let empty = rows.is_empty();
     rsx! {
         if empty {
-            p { class: "muted", "no watches yet — add one below" }
+            Empty { note: "no watches yet — add one below".to_string() }
         } else {
             table {
                 thead {

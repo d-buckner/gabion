@@ -30,6 +30,24 @@ pub trait Store: Clone + Send + Sync + 'static {
     async fn delete(&self, key: &str) -> Result<(), StoreError>;
     /// Keys under `prefix` (lexicographic scan; fine for v1 scales).
     async fn list(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError>;
+
+    /// A write that carries the caller, for a store that wants to record who made
+    /// it.
+    ///
+    /// The caller reaches every service method as `Ctx`; this is the one effect
+    /// that usually wants to keep it, because "who wrote this row" is the first
+    /// question an audit asks. The default drops it and delegates to
+    /// [`Store::set`], so an implementation that does not care compiles unchanged —
+    /// and one that does can answer [`written_by`](crate::testing::InMemoryStore)
+    /// or its own equivalent.
+    async fn set_as(
+        &self,
+        _ctx: &crate::ctx::Ctx,
+        key: &str,
+        value: &str,
+    ) -> Result<(), StoreError> {
+        self.set(key, value).await
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

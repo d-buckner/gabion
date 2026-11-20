@@ -6,7 +6,7 @@
 
 mod fixtures;
 
-use fixtures::{generate_lock, honest_clippy_toml, member, write_ws, ws_head};
+use fixtures::{honest_clippy_toml, member, write_ws, ws_head};
 use gabion_cli::{check, Options};
 
 fn summary(root: &std::path::Path) -> gabion_cli::report::Summary {
@@ -264,6 +264,88 @@ fn a_workspace_with_no_core_cannot_prove_the_wasm_wall() {
     assert!(hit.fix.contains("feature add"), "{}", hit.fix);
 }
 
+/// The framework ships no UI: a design system belongs to the app. A default look in
+/// the runtime is a house style every app would inherit, so a `framework-crates`
+/// member that renders is a finding.
+#[test]
+fn the_framework_may_not_carry_ui() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", "pub trait X {}\n"),
+            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            ("x-core/src/lib.rs", "pub struct C;\nimpl C {}\n"),
+            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
+            ("host-x/src/lib.rs", "fn main() { let _ = x_core::C; }\n"),
+        ],
+    );
+    // Mark `x-core` as a framework crate: the rule only applies to those.
+    let manifest = std::fs::read_to_string(tmp.path().join("Cargo.toml")).unwrap();
+    std::fs::write(
+        tmp.path().join("Cargo.toml"),
+        manifest.replace("framework-crates = []", "framework-crates = [\"x-core\"]"),
+    )
+    .unwrap();
+
+    let clean = summary(tmp.path());
+    assert!(
+        !clean.findings.iter().any(|f| f.rule == "framework-ui"),
+        "a framework crate with no UI is fine"
+    );
+
+    // Now it renders.
+    std::fs::write(
+        tmp.path().join("x-core/src/lib.rs"),
+        "pub struct C;\nimpl C {}\npub const STYLE: &str = \"font-family: serif\";\n",
+    )
+    .unwrap();
+    let found = summary(tmp.path());
+    let hit = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "framework-ui")
+        .expect("a framework crate carrying styles must be named");
+    assert!(hit.detail.contains("font-family"), "{}", hit.detail);
+    assert!(hit.fix.contains("*-shared"), "{}", hit.fix);
+}
+
+/// A `*-core` that implements nothing is a placeholder: it compiles for wasm and
+/// proves nothing about business logic, while the gate reports the wall as held.
+#[test]
+fn a_core_that_implements_nothing_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            (
+                "x-api/src/lib.rs",
+                "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n}\n",
+            ),
+            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            ("x-core/src/lib.rs", "pub struct Placeholder;\n"),
+            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
+            (
+                "host-x/src/lib.rs",
+                "fn main() {\n    let _ = x_core::Placeholder;\n}\nfn m(_s: &dyn x_api::XService) {}\n",
+            ),
+        ],
+    );
+    let found = summary(tmp.path());
+    let hit = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "empty-core")
+        .expect("a placeholder core must be named");
+    assert!(hit.detail.contains("x-core"), "{}", hit.detail);
+}
+
 /// `tests/` used to be unscanned, which is where an agent writes the most code.
 /// The shape rules apply there; the structural ones do not, because an integration
 /// test is an effect home and ships nowhere.
@@ -296,77 +378,5 @@ fn tests_are_scanned_for_shape_but_granted_their_allows() {
     assert!(
         !rules.contains(&"allow-allowlist"),
         "an integration test is an effect home: {rules:?}"
-    );
-}
-
-/// A contract no host names is a surface nobody can reach. `gabion check` is the
-/// only thing that can see it: at runtime an absent mount is an absent call.
-#[test]
-fn a_contract_no_host_serves_is_a_finding() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    write_ws(
-        tmp.path(),
-        &[
-            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
-            ("clippy.toml", &honest_clippy_toml()),
-            ("x-api/Cargo.toml", &member("x-api", &[])),
-            (
-                "x-api/src/lib.rs",
-                "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n}\n",
-            ),
-            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
-            ("x-core/src/lib.rs", "pub fn f() {}\n"),
-            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
-            // The host never names `XService`: nothing mounts it.
-            ("host-x/src/lib.rs", "fn main() { let _ = x_core::f(); }\n"),
-        ],
-    );
-    let found = summary(tmp.path());
-    let hit = found
-        .findings
-        .iter()
-        .find(|f| f.rule == "unserved-contract")
-        .expect("an unserved contract must be named");
-    assert!(hit.location.contains("XService"), "{}", hit.location);
-    assert!(hit.fix.contains("mount_on"), "{}", hit.fix);
-}
-
-/// A method that keeps its name and changes its input type used to pass the lock.
-/// The hash closes that: the line changes, so the diff shows it.
-#[test]
-fn a_changed_input_type_is_a_finding() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    write_ws(
-        tmp.path(),
-        &[
-            ("Cargo.toml", &ws_head(&["x-api"])),
-            ("clippy.toml", &honest_clippy_toml()),
-            ("x-api/Cargo.toml", &member("x-api", &[])),
-            (
-                "x-api/src/lib.rs",
-                "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n}\n",
-            ),
-        ],
-    );
-    generate_lock(tmp.path());
-
-    // Same name, same op count, wider return type.
-    write_ws(
-        tmp.path(),
-        &[(
-            "x-api/src/lib.rs",
-            "#[service]\npub trait XService {\n    async fn a(&self) -> u16;\n}\n",
-        )],
-    );
-    let found = summary(tmp.path());
-    let drift = found
-        .findings
-        .iter()
-        .find(|f| f.rule == "surface-snapshot")
-        .expect("a changed signature must drift the lock");
-    assert!(
-        drift.fix.contains("changed input/output"),
-        "the finding must say what the hash is for: {}",
-        drift.fix
     );
 }

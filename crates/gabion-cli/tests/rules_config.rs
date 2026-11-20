@@ -193,3 +193,67 @@ fn an_app_cannot_loosen_a_required_threshold() {
         "a threshold loosened through gabion config must still be a finding, got {config_findings:?}"
     );
 }
+
+/// `--fix` restores the two findings that are pure text edits: a member that never
+/// opted into the workspace lints, and a deleted clippy threshold. Both are edits
+/// to files the app owns, so the repair is an append rather than a rewrite.
+#[test]
+fn fix_restores_the_lints_opt_in_and_a_deleted_threshold() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core"])),
+            // No thresholds, and the core never opts in.
+            ("clippy.toml", "disallowed-types = []\n"),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", "pub trait X {}\n"),
+            (
+                "x-core/Cargo.toml",
+                "[package]\nname = \"x-core\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\nx-api = { path = \"../x-api\" }\n",
+            ),
+            ("x-core/src/lib.rs", "pub struct C;\nimpl C {}\n"),
+        ],
+    );
+
+    let mut before_opts = Options::new(tmp.path());
+    before_opts.fast = true;
+    let before = check(&before_opts);
+    let rules: Vec<&str> = before.findings.iter().map(|f| f.rule).collect();
+    assert!(rules.contains(&"workspace-lints"), "{rules:?}");
+    assert!(rules.contains(&"clippy-config"), "{rules:?}");
+
+    let mut fix = Options::new(tmp.path());
+    fix.fast = true;
+    fix.fix = true;
+    let applied = check(&fix);
+    assert!(
+        applied
+            .notes
+            .iter()
+            .any(|n| n.contains("mechanical finding(s) applied")
+                || n.contains("text edit(s) applied")),
+        "the summary must say what it changed: {:?}",
+        applied.notes
+    );
+
+    let core_manifest = std::fs::read_to_string(tmp.path().join("x-core/Cargo.toml")).unwrap();
+    assert!(
+        core_manifest.contains("workspace = true"),
+        "the opt-in was appended:\n{core_manifest}"
+    );
+    let clippy = std::fs::read_to_string(tmp.path().join("clippy.toml")).unwrap();
+    assert!(
+        clippy.contains("cognitive-complexity-threshold = 15"),
+        "the threshold was restored:\n{clippy}"
+    );
+
+    // Running it twice must not stack a second `[lints]` block.
+    let _ = check(&fix);
+    let core_manifest = std::fs::read_to_string(tmp.path().join("x-core/Cargo.toml")).unwrap();
+    assert_eq!(
+        core_manifest.matches("[lints]").count(),
+        1,
+        "{core_manifest}"
+    );
+}

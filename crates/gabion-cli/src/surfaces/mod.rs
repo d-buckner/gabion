@@ -23,9 +23,11 @@
 //! feature that leaves the `openapi` feature off.
 //!
 //! The hash has limits, and they are the reason it is a hash and not a proof: it
-//! reads the tokens of the signature and one level of same-crate definitions, so a
-//! type defined in another crate is hashed by name only, and a change to *how* a
-//! type serializes is invisible to it.
+//! reads the tokens of the signature and the definitions it names, looking them up
+//! across the workspace (so `checks_api::CheckId` counts even from another crate),
+//! one level deep. Two different types with the same name both feed the hash, which
+//! is conservative rather than wrong: the input changes if either does. A change to
+//! *how* a type serializes is invisible to it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -56,8 +58,9 @@ struct Collector {
     krate: String,
     found: BTreeSet<String>,
     traits: Vec<String>,
-    /// `struct`/`enum`/`type` definitions in this crate, rendered, so a signature
-    /// that names one is hashed with the shape of that definition.
+    /// `struct`/`enum`/`type` definitions in the workspace, rendered, so a
+    /// signature that names one is hashed with the shape of that definition —
+    /// including a type that lives in another crate's contract.
     defs: BTreeMap<String, String>,
 }
 
@@ -92,34 +95,10 @@ impl<'ast> Visit<'ast> for Collector {
         }
         syn::visit::visit_item_trait(self, node);
     }
-
-    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
-        self.defs.insert(
-            node.ident.to_string(),
-            node.fields.to_token_stream().to_string(),
-        );
-        syn::visit::visit_item_struct(self, node);
-    }
-
-    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
-        self.defs.insert(
-            node.ident.to_string(),
-            node.variants.to_token_stream().to_string(),
-        );
-        syn::visit::visit_item_enum(self, node);
-    }
-
-    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
-        self.defs.insert(
-            node.ident.to_string(),
-            node.ty.to_token_stream().to_string(),
-        );
-        syn::visit::visit_item_type(self, node);
-    }
 }
 
-/// FNV-1a over the signature and every same-crate definition it names, as eight
-/// hex characters. Not a cryptographic hash: it is a drift detector, and a
+/// FNV-1a over the signature and every definition it names, as sixteen hex
+/// characters. Not a cryptographic hash: it is a drift detector, and a
 /// collision means a missed diff, not a security hole.
 fn digest(signature: &str, defs: &BTreeMap<String, String>) -> String {
     let mut input = signature.to_string();
@@ -137,52 +116,69 @@ fn digest(signature: &str, defs: &BTreeMap<String, String>) -> String {
     format!("{hash:016x}")
 }
 
-fn collect_crate(krate: &Crate) -> Collected {
+fn collect_crate(krate: &Crate, defs: &BTreeMap<String, String>) -> Collected {
     let mut v = Collector {
         krate: krate.name.clone(),
         found: BTreeSet::new(),
         traits: Vec::new(),
-        defs: BTreeMap::new(),
+        defs: defs.clone(),
     };
-    // Two passes over the crate's files: definitions first, so a signature in
-    // `lib.rs` can be hashed with a struct declared in `types.rs`. A second file
-    // read is cheaper than a bookkeeping scheme, and crates here are small.
-    let files: Vec<(PathBuf, File)> = krate
-        .source_files()
-        .into_iter()
-        .filter_map(|path| {
-            let text = std::fs::read_to_string(&path).ok()?;
-            syn::parse_str::<File>(&text).ok().map(|file| (path, file))
-        })
-        .collect();
-    for (_, file) in &files {
-        for item in &file.items {
-            match item {
-                Item::Struct(s) => {
-                    v.defs
-                        .insert(s.ident.to_string(), s.fields.to_token_stream().to_string());
-                }
-                Item::Enum(e) => {
-                    v.defs.insert(
-                        e.ident.to_string(),
-                        e.variants.to_token_stream().to_string(),
-                    );
-                }
-                Item::Type(t) => {
-                    v.defs
-                        .insert(t.ident.to_string(), t.ty.to_token_stream().to_string());
-                }
-                _ => {}
-            }
-        }
-    }
-    for (_, file) in &files {
-        syn::visit::visit_file(&mut v, file);
+    for path in krate.source_files() {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(file) = syn::parse_str::<File>(&text) else {
+            continue;
+        };
+        syn::visit::visit_file(&mut v, &file);
     }
     Collected {
         ops: v.found,
         traits: v.traits,
     }
+}
+
+/// Every `struct`/`enum`/`type` definition in the workspace, rendered to tokens
+/// and keyed by name.
+///
+/// Keyed by name because a signature mentions the name it imported, and a
+/// definition may live in another crate's contract — which is exactly the case the
+/// per-crate version missed. A collision (two crates with a `Todo`) is resolved by
+/// including both renderings, sorted, so the hash changes if either type does.
+fn workspace_definitions(graph: &Graph) -> BTreeMap<String, String> {
+    let mut by_name: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for krate in &graph.crates {
+        for path in krate.source_files() {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(file) = syn::parse_str::<File>(&text) else {
+                continue;
+            };
+            for item in &file.items {
+                let (name, rendered) = match item {
+                    Item::Struct(s) => {
+                        (s.ident.to_string(), s.fields.to_token_stream().to_string())
+                    }
+                    Item::Enum(e) => (
+                        e.ident.to_string(),
+                        e.variants.to_token_stream().to_string(),
+                    ),
+                    Item::Type(t) => (t.ident.to_string(), t.ty.to_token_stream().to_string()),
+                    _ => continue,
+                };
+                by_name.entry(name).or_default().push(rendered);
+            }
+        }
+    }
+    by_name
+        .into_iter()
+        .map(|(name, mut rendered)| {
+            rendered.sort();
+            rendered.dedup();
+            (name, rendered.join("\u{1e}"))
+        })
+        .collect()
 }
 
 /// A `#[service]` trait outside `*-api` is a finding: the trait is the boundary,
@@ -226,7 +222,7 @@ fn write_lock(root: &Path, current: &BTreeSet<String>) -> Result<(), String> {
     }
     let mut body = String::from(
         "# gabion public surface. Every line is one reachable operation, hashed over\n\
-         # its signature and the same-crate types it names.\n\
+         # its signature and the definitions it names, in any crate.\n\
          # Reachable over CLI, HTTP, MCP and the typed client. Review changes here like\n\
          # an API change: a changed hash is a changed input or output.\n",
     );
@@ -247,8 +243,9 @@ pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut current = BTreeSet::new();
     let mut contracts = BTreeSet::new();
+    let defs = workspace_definitions(graph);
     for krate in &graph.crates {
-        let collected = collect_crate(krate);
+        let collected = collect_crate(krate, &defs);
         findings.extend(placement_findings(krate, &collected));
         for op in &collected.ops {
             let mut parts = op.split("::");

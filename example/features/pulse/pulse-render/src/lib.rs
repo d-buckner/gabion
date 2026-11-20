@@ -25,59 +25,12 @@ use gabion::prelude::Ctx;
 use incidents_api::IncidentService;
 use std::future::Future;
 use std::sync::Arc;
+use ui_shared::{Empty, Failure, Heading, Notice, Surface};
 
 mod board;
 mod time;
 
 use board::{board_body, latency, load};
-
-const CSS: &str = r#"
-:root { color-scheme: dark; }
-body { font-family: ui-sans-serif, system-ui, sans-serif; background: #101014;
-       color: #e8e6e3; margin: 0; }
-main { max-width: 52rem; margin: 2.5rem auto 5rem; padding: 0 1.25rem; }
-header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.5rem; }
-h1 { font-size: 1.35rem; font-weight: 600; letter-spacing: .02em; margin: 0; }
-h2 { font-size: .8rem; font-weight: 600; text-transform: uppercase;
-     letter-spacing: .08em; opacity: .55; margin: 2.25rem 0 .5rem; }
-.sub { opacity: .45; font-size: .85rem; }
-.actions { margin-left: auto; display: flex; gap: .5rem; }
-button { font: inherit; font-size: .8rem; color: #e8e6e3; background: #26262f;
-         border: 1px solid #33333d; border-radius: .375rem; padding: .3rem .6rem;
-         cursor: pointer; }
-button:hover { background: #31313c; }
-button.primary { background: #3b5bdb; border-color: #4c6ef5; }
-button.primary:hover { background: #4c6ef5; }
-button.ghost { background: transparent; }
-button.ghost:hover { background: #1e1e26; }
-form.add { display: flex; gap: .5rem; margin: 1.5rem 0 0; }
-input { font: inherit; font-size: .85rem; color: inherit; background: #17171d;
-        border: 1px solid #2c2c36; border-radius: .375rem; padding: .4rem .6rem; }
-input.name { width: 9rem; }
-input.url { flex: 1; }
-input:focus { outline: 1px solid #4c6ef5; border-color: #4c6ef5; }
-table { width: 100%; border-collapse: collapse; margin-top: 1.75rem; }
-th { text-align: left; font-size: .7rem; font-weight: 500; text-transform: uppercase;
-     letter-spacing: .07em; opacity: .4; padding: 0 .4rem .5rem; }
-td { padding: .6rem .4rem; border-top: 1px solid #23232b; vertical-align: top; }
-td.dot { width: .9rem; padding-top: .65rem; }
-td.pct { text-align: right; font-variant-numeric: tabular-nums; }
-td.act { text-align: right; width: 4.5rem; }
-.name { font-weight: 600; }
-.url { opacity: .45; font-size: .78rem; word-break: break-all; }
-.ok { color: #4ec9b0; }
-.bad { color: #e06c75; }
-.idle { opacity: .35; }
-.muted { opacity: .5; font-size: .8rem; }
-.err { color: #e06c75; font-size: .85rem; }
-.notice { color: #4ec9b0; font-size: .85rem; }
-.banner { margin: .75rem 0 0; }
-ul.outages { list-style: none; padding: 0; margin: 0; font-size: .85rem; }
-ul.outages li { display: flex; gap: .6rem; padding: .45rem .1rem;
-                border-top: 1px solid #23232b; }
-ul.outages .who { font-weight: 600; min-width: 7rem; }
-ul.outages .when { opacity: .5; margin-left: auto; font-variant-numeric: tabular-nums; }
-"#;
 
 /// Service handles injected by the host through the launch context. The UI only
 /// ever sees the two contracts.
@@ -253,31 +206,32 @@ pub fn StatusApp() -> Element {
 
     let current = board.read();
     let body = match &*current {
-        None => rsx! { p { class: "muted", "loading…" } },
-        Some(Err(e)) => rsx! { p { class: "err", "{e}" } },
+        None => rsx! { Empty { note: "loading…".to_string() } },
+        Some(Err(e)) => rsx! { Failure { message: e.clone() } },
         Some(Ok(loaded)) => board_body(loaded, &svc, ui),
+    };
+    let actions = rsx! {
+        button { r#type: "button", class: "primary", onclick: sweep_click, "sweep due" }
+        button { r#type: "button", class: "ghost", onclick: evaluate_click, "evaluate" }
+        button { r#type: "button", class: "ghost", onclick: refresh_click, "refresh" }
     };
 
     rsx! {
-        style { dangerous_inner_html: CSS }
-        main {
-            header {
-                h1 { "pulse" }
-                span { class: "sub", "watch URLs, record outages" }
-                div { class: "actions",
-                    button { r#type: "button", class: "primary", onclick: sweep_click, "sweep due" }
-                    button { r#type: "button", class: "ghost", onclick: evaluate_click, "evaluate" }
-                    button { r#type: "button", class: "ghost", onclick: refresh_click, "refresh" }
-                }
+        style { dangerous_inner_html: ui_shared::CSS }
+        Surface {
+            Heading {
+                title: "pulse".to_string(),
+                subtitle: Some("watch URLs, record outages".to_string()),
+                actions: Some(actions),
             }
             if !note().is_empty() {
-                p { class: "notice banner", "{note}" }
+                Notice { message: note() }
             }
             if !error().is_empty() {
-                p { class: "err banner", "{error}" }
+                Failure { message: error() }
             }
             {body}
-            form { class: "add", onsubmit: add,
+            form { class: "gb add", onsubmit: add,
                 input {
                     class: "name",
                     placeholder: "name",

@@ -127,3 +127,28 @@ fn a_unit_input_is_still_allowed_after_the_context() {
     );
     assert!(out.is_ok());
 }
+
+#[test]
+fn a_streaming_return_is_a_hard_error() {
+    // Every surface assumes one value: schemars schemas it, the client parses one
+    // body, the CLI renders one. Failing here beats an E0038 from generated code.
+    let msg = err_of(
+        "pub trait S {
+        async fn watch(&self, ctx: &Ctx) -> Result<impl Stream<Item = u8>, E>;
+    }",
+    );
+    assert!(
+        msg.contains("streaming returns are not supported"),
+        "expected the streaming error, got: {msg}"
+    );
+}
+
+#[test]
+fn a_type_that_merely_contains_the_word_stream_is_fine() {
+    let out = expand_src(
+        "pub trait S {
+        async fn read(&self, ctx: &Ctx) -> Result<StreamConfig, E>;
+    }",
+    );
+    assert!(out.is_ok(), "a type named StreamConfig is not a stream");
+}

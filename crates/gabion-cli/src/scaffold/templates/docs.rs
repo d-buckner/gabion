@@ -24,5 +24,18 @@ contract the host hands it. Adding a method to the `#[service]` trait publishes 
 on every surface at once, which is why `gabion check` locks the reachable set in
 `.gabion/surfaces.lock` — a new op is a diff someone reviews.
 
+## The look is yours
+
+The framework ships no UI, no tokens and no default theme — that is `framework-ui`,
+and it fails the gate if a framework crate ever renders. When you add a UI, its
+design system goes in a `*-shared` crate of your own:
+
+```
+features/<name>-ui-shared/     tokens + the components your panels share
+```
+`*-shared` may depend on the runtime only, and every `*-render` crate and host may
+use it, so it is the one place a look is decided. Nothing in the framework reads it,
+and nothing here assumes one: this scaffold's render crate prints.
+
 Add another feature with `gabion feature add <name>`.
 "#;

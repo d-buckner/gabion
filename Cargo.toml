@@ -13,6 +13,7 @@ members = [
     "example/features/incidents/incidents-api",
     "example/features/incidents/incidents-core",
     "example/features/pulse/pulse-render",
+    "example/shared/ui-shared",
     "example/hosts/host-native",
     "example/hosts/host-pulse-cli",
     "example/hosts/host-pulse-native",

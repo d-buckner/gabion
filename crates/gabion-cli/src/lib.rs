@@ -192,14 +192,15 @@ fn finish(
 
 /// Apply every mechanical fix. Returns how many were applied.
 ///
-/// A file is edited by replacing the exact text on the reported line, and the edit
-/// is refused when that text is no longer there — a stale line number must not
-/// rewrite the wrong `pub`.
+/// A replacement is refused when the expected text is no longer on the reported
+/// line — a stale line number must not rewrite the wrong `pub`. An append is
+/// idempotent: it skips text the file already ends with, so running `--fix` twice
+/// does not stack `[lints]` blocks.
 fn apply_fixes(findings: &[Finding]) -> usize {
     let mut by_file: std::collections::BTreeMap<&std::path::Path, Vec<&report::Fix>> =
         std::collections::BTreeMap::new();
     for fix in findings.iter().filter_map(|f| f.mechanical.as_ref()) {
-        by_file.entry(fix.path.as_path()).or_default().push(fix);
+        by_file.entry(fix.path()).or_default().push(fix);
     }
     let mut applied = 0;
     for (path, fixes) in by_file {
@@ -209,15 +210,29 @@ fn apply_fixes(findings: &[Finding]) -> usize {
         let mut lines: Vec<String> = text.lines().map(String::from).collect();
         let mut changed = false;
         for fix in fixes {
-            let Some(line) = lines.get_mut(fix.line.saturating_sub(1)) else {
-                continue;
-            };
-            if !line.contains(&fix.from) {
-                continue;
+            match fix {
+                report::Fix::Replace { line, from, to, .. } => {
+                    let Some(current) = lines.get_mut(line.saturating_sub(1)) else {
+                        continue;
+                    };
+                    if !current.contains(from.as_str()) {
+                        continue;
+                    }
+                    *current = current.replacen(from.as_str(), to, 1);
+                    applied += 1;
+                    changed = true;
+                }
+                report::Fix::Append { text, .. } => {
+                    let body = lines.join("\n");
+                    if body.ends_with(text.as_str()) {
+                        continue;
+                    }
+                    let extra = text.lines().map(String::from).collect::<Vec<_>>();
+                    lines.extend(extra);
+                    applied += 1;
+                    changed = true;
+                }
             }
-            *line = line.replacen(&fix.from, &fix.to, 1);
-            applied += 1;
-            changed = true;
         }
         if changed {
             let mut body = lines.join("\n");

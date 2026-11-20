@@ -166,6 +166,7 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A core crate imports a render crate | `core-imports-render` |
 | The gabion runtime depends on an app feature | `framework-purity` |
 | A crate depends on a host | `host-dependency` |
+| The framework growing a default theme, components or a stylesheet | `framework-ui`: the framework ships no UI. A look belongs to the app, in a `*-shared` design-system crate. |
 | `std::fs`, `std::net`, `std::thread`, `std::time`, `std::env`, `std::process` in `*-core` | `disallowed_types` / `disallowed_methods` deny. The wasm target does not catch these. |
 | `tokio`, `axum`, `reqwest`, `sqlx` in a `*-core` manifest | `core-runtime-dep` |
 | A `pub use` glob in an `*-api` contract | `contract-glob` |
@@ -178,6 +179,8 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | `pub` in a `*-core` that nothing names | `over-broad-visibility`, and `--fix` narrows it to `pub(crate)`. |
 | A hand-written axum handler in a feature | `axum-outside-host`. The HTTP surface is generated; a hand-written route is one the OpenAPI document, the MCP tool and the client do not know about. |
 | A workspace with no `*-core` | `no-wasm-proof`. The wasm step would otherwise pass having built nothing. |
+| A `*-core` that implements nothing | `empty-core`. A placeholder core makes the wasm build green about a wall nothing stands behind. |
+| A streaming return in a `#[service]` trait | A hard compile error: no surface carries a stream in v1, and generating them anyway produced an E0038 from code the author did not write. |
 | A changed input or output type on an existing op | `surface-snapshot`, whose lines carry a hash of the signature. |
 | A TODO in a test file, or a 900-line test | `no-todo`, `file-length`, `too-many-branches` — `tests/` is scanned by the shape rules. |
 | A `#[surface(..)]` or `#[internal]` left in a contract | The macro refuses to compile. Per-method surface attributes are gone. |
@@ -186,6 +189,20 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A long file, a deep function, a wide signature | `file-length` 400, `too-many-branches` 10, cognitive complexity 15, 80 lines, 6 arguments |
 | A `TODO`, `FIXME`, or `XXX` | `no-todo` |
 | Unused dependencies, bad licenses, advisories | `cargo shear`, `cargo deny`. A missing tool is a named failure, or a named SKIP with `--allow-missing-tools` — never silence. |
+
+## The look belongs to the app
+
+The framework ships no components, no tokens and no default theme — `framework-ui`
+fails the gate if a framework crate starts to render. A design system is an
+app-level crate, named `*-shared` so the edge table lets every `*-render` crate and
+every host use it and lets it depend on the runtime only. The examples' one lives in
+`example/shared/ui-shared`: tokens as CSS, `Surface`, `Heading`, `Action`, `Empty`,
+`Failure`, `Notice`. Replace the file; nothing in the framework reads it.
+
+That shape is deliberate. Features live inside an app, so a feature's render crate
+may use its app's kit — which is why composing two features on one screen produces
+one look. A component library meant to travel between *apps* would need headless
+components and a theme parameter, and that is a different product.
 
 ## One core, every surface
 
@@ -312,11 +329,13 @@ What it proves that the todo example cannot:
 - **The gate's own gaps are closed.** `over-broad-visibility`, `axum-outside-host`,
   `unserved-contract`, `no-wasm-proof`, `--fix` for mechanical findings, missing
   tools reported as a named SKIP, and `tests/` scanned by the shape rules.
-- **UIs compose.** `render -> render` is allowed, so two features can share a
-  screen; the wall moved to `over-broad-visibility`, which holds a render crate to
-  "`pub` means a component another feature may mount". Panels take props (data from
-  `*-api` plus callbacks), not service handles, and each published panel has a
-  committed HTML snapshot.
+- **UIs compose, and the look is the app's.** `render -> render` is allowed, so two
+  features can share a screen; the wall moved to `over-broad-visibility`, which holds
+  a render crate to "`pub` means a component another feature may mount". Panels take
+  props (data from `*-api` plus callbacks), not service handles, and each published
+  panel has a committed HTML snapshot. The design system is app-level: the examples
+  keep theirs in `example/shared/ui-shared`, and `framework-ui` fails the gate if the
+  framework itself ever grows a component, a token or a stylesheet.
 - **The board is playable, not a screenshot.** Add a watch, sweep what is due,
   probe one now, evaluate outages, and watch uptime move — every button is a
   call on one of the two contracts, and the render crate still names no core.
@@ -337,13 +356,15 @@ cargo run -p gabion-cli -- new myapp --dir /tmp/myapp --gabion-path "$PWD"
 cd /tmp/myapp
 cargo run -p gabion-cli -- check          # green before you write a line
 cargo run -p gabion-cli -- feature add billing
+cargo run -p gabion-cli -- feature remove billing   # refuses while a host uses it
 cargo run -p gabion-cli -- dev            # watch, rebuild, restart
 ```
 
 `gabion new` writes the workspace metadata, the edge table, `[workspace.lints]`,
 the effect-ban `clippy.toml`, a toolchain pin, and a surface lock generated by the
-gate's own collector. `gabion check --fix` applies the mechanical findings and
-leaves the rest for a decision.
+gate's own collector. `gabion check --fix` applies the mechanical findings (a
+narrowed `pub`, the lock, a missing lints opt-in, a deleted threshold) and leaves
+the rest for a decision.
 
 ```sh
 # The server host: builds with no system packages.
@@ -402,13 +423,15 @@ The full gate also runs `cargo shear` and `cargo deny`. Install them with
 ```
 crates/gabion/          runtime: capability traits, Ctx, error model, MCP, registry, test caps
 crates/gabion-macros/   #[service]: cli, server, openapi, mcp, client, registry, conformance
-crates/gabion-native/   native caps (SystemClock, FileStore, TokioSleep, ReqwestHttp),
-                        the MCP stdio pump and the axum host router
+crates/gabion-native/   native caps (SystemClock, FileStore with written-by sidecar,
+                        TokioSleep, ReqwestHttp), the concurrent MCP stdio pump and
+                        the axum host router
 crates/gabion-cli/      gabion check (the gate) + new / feature add / dev
 example/features/todo/  todo-api | todo-core | todo-render  (the colocation unit)
 example/features/checks/     checks-api | checks-core     (pulse: watch URLs)
 example/features/incidents/  incidents-api | incidents-core (pulse: outages, reads checks)
 example/features/pulse/      pulse-render                 (pulse: the status board)
+example/shared/ui-shared/    design tokens + the shared panel states
 example/hosts/          host-native (CLI + UI) | host-server (axum) | host-web (wasm)
                         host-pulse-cli | host-pulse-server | host-pulse-native | host-pulse-web
 docs/                   the spec, the inspection log, the collab proposal
@@ -461,9 +484,9 @@ opted in); a generated four-adapter conformance suite; `gabion new` /
 — including `over-broad-visibility`, `axum-outside-host`, `unserved-contract`,
 `no-wasm-proof` and `--fix`; and CI on GitHub Actions.
 
-**Not built:** a renderer-agnostic UI kit; `Ctx` threaded into capability impls, so
-a store write does not know who is writing; streaming surfaces; cancellation across
-a process boundary; `gabion feature remove`; and any publish story — v0.1 is
+**Not built:** streaming surfaces (the refusal is built, the feature is the spec's
+open v1/v2 question); an HTTP cancellation channel (MCP has one); `gabion host add`;
+a UI gallery; a renderer other than Dioxus; and any publish story — v0.1 is
 path-dependency only, so `gabion new` takes `--gabion-path` and points at a
 checkout.
 
@@ -472,8 +495,10 @@ names, so a mention in a comment counts as a use and it cannot prove a `pub` ite
 is wanted; `axum-outside-host` reads paths, so a re-export slips past it;
 `unserved-contract` proves a host names a trait, not that it mounts it; the
 conformance suite cannot compare a create, because two calls are two creates; the
-surface-lock hash covers same-crate definitions only; and the Forgejo workflow
-still has no runner, so GitHub Actions is what enforces the wall.
+lock's hash follows a signature's named types one level, so a nested struct is
+hashed by name; the UI snapshots cover the view layer, not interaction or the async
+containers; cancellation is offered to a tool, not imposed on it; and the Forgejo
+workflow still has no runner, so GitHub Actions is what enforces the wall.
 
 [docs/GAPS.md](docs/GAPS.md) is the full inspection log, ordered by how much
 damage each silence does. The house rule there: a gap closes when a failing test

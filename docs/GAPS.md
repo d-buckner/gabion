@@ -53,26 +53,27 @@ recorded in §7.
 
 ## 4. Not built
 
-- **Renderer-agnostic UI kit.** The render crates print or use Dioxus directly;
-  there is no shared component kit (tokens, layout, table, button), and the spec
-  still lists that as an open decision. Composition itself is no longer blocked —
-  `render -> render` is open and panels take props — but two features' panels do not
-  yet *look* like each other.
-- **`Ctx` propagation into capability impls.** The caller reaches every service
-  method, but a `Store` write does not know who is writing. Per-record attribution
-  is an app decision until something needs it.
+- **A renderer other than Dioxus.** The kit and the render crates are Dioxus. The
+  framework does not depend on that choice — it ships no UI at all (`framework-ui`)
+  and the surfaces are HTTP/MCP/clap — but nothing in the repo demonstrates a second
+  renderer, and spec §2's "pluggable renderer" decision is still open in practice.
+- **Portable components.** A panel can be composed inside its app; it cannot travel
+  to another app, because it uses its app's `*-shared` kit. A headless/themeable kit
+  would be a product of its own, and deliberately not this one.
 - **Streaming surfaces** (`Stream` return support) — v1 or v2 is still open in the
-  spec, and nothing in the code reserves the shape beyond the trait being
-  `async_trait`.
-- **`Ctx` cancellation across a process boundary.** HTTP drops the handler future
-  on disconnect, which cancels; there is no wire-level cancel message, so a client
-  that stops listening learns nothing and a server that is still probing cannot be
-  told to stop.
-- **`gabion feature remove`**, and any scaffolding for a second host: `gabion new`
-  writes two, `gabion feature add` writes crates.
+  spec. What exists now is the refusal: a streaming return is a compile error with
+  a reason (§7), rather than four generated surfaces that cannot carry a stream.
+- **`Ctx` cancellation over HTTP.** The MCP half is built
+  (`notifications/cancelled`, §7); HTTP has no cancel channel because a dropped
+  connection cancels the handler future, and a client that stopped listening learns
+  nothing. A wire-level cancel for HTTP would be a protocol of its own.
+- **Scaffolding for a second host.** `gabion new` writes two and `gabion feature
+  add`/`remove` manage features; there is no `gabion host add`.
 - **The publish story.** v0.1 is path-dependency only (`publish = false`), so
   `gabion new` takes `--gabion-path` and every scaffolded app points at a
-  checkout. Nothing here is ready for crates.io.
+  checkout. This is a decision waiting on the name (spec §10), not a build task.
+- **A UI gallery.** Panels have per-component snapshots, but nothing renders them
+  side by side for a visual review.
 
 ## 5. Browser and desktop, shipped for one app
 
@@ -166,6 +167,61 @@ config and no way to run it in a browser.
   form, the toolbar, the banners) stays in the app component that owns the loading.
   They are `pub(crate)` until a second screen mounts them, at which point the
   visibility rule asks for the `pub`.
+- **Feature UIs did not look alike.** `example/shared/ui-shared` — an *app-level*
+  crate, class `shared`, so every render crate and host in that app may use it and it
+  may use the framework only — holds the design tokens as one CSS string and the
+  components every panel shares: `Surface`, `Heading`, `Action`, `Empty`, `Failure`,
+  `Notice`. Both example render crates use it, so the API has two callers rather than
+  being published on faith, and the committed UI snapshots did not change, because a
+  refactor with no visual difference should not churn the artifact. Plain CSS rather
+  than a bundler step: the desktop window applies exactly what the page applies.
+  **It is not the framework's**, and `framework-ui` is the rule that keeps it that
+  way: a framework crate that renders — `rsx!`, a `dangerous_inner_html`, a
+  `font-family`, a `color-scheme` — is a finding, because a look in the runtime is a
+  house style every app inherits. Proven by `the_framework_may_not_carry_ui` (a
+  framework crate marked as one, clean, then given a style constant).
+- **A workspace-level digest missed cross-crate types.** The lock hashed a
+  definition only when it lived in the same crate, so a method taking
+  `other_api::Shared` recorded that type by name. The digest now builds one
+  workspace-wide, name-keyed map of every `struct`/`enum`/`type` and hashes the
+  definitions a signature names, with collisions resolved by including both
+  renderings. Proven by `a_shared_type_changing_in_another_crate_drifts_the_lock`.
+- **A `*-core` that implemented nothing** passed the wasm step, so the wall was
+  reported as held by a crate holding nothing. `empty-core` now names it. Proven by
+  `a_core_that_implements_nothing_is_a_finding`.
+- **`--fix` covered two rules.** It covers four: `Fix` is now an enum with
+  `Replace` (checked against the expected text, so a stale line cannot rewrite the
+  wrong `pub`) and idempotent `Append`. A member that never opted into
+  `[workspace.lints]` and a deleted clippy threshold are both repaired. A missing
+  *ban* stays advice — it lives inside an array with a reason, and that edit needs a
+  human. Proven by `fix_restores_the_lints_opt_in_and_a_deleted_threshold`.
+- **There was no way to remove a feature.** `gabion feature remove <name>` deletes
+  the crates, removes the members, and rewrites the lock; it refuses when a manifest
+  still depends on the feature, naming it. Writing the test found a real bug in
+  `feature add` — new members were inserted flush against the `]`, so the last one
+  shared a line with it and the line-based removal could not match. Proven by
+  `a_feature_can_be_removed_again`.
+- **A streaming return generated surfaces that could not work.** `Result<Stream<T>,
+  E>` reached schemars, the client, the CLI and MCP, and `impl Trait` is not
+  dyn-compatible — the author got an E0038 from code they did not write. It is a
+  compile error at the return type now, with the reason. Proven by
+  `a_streaming_return_is_a_hard_error`.
+- **An agent could not cancel a tool call.** `Ctx` carried a cancellation signal no
+  surface could reach. MCP's `notifications/cancelled` now cancels the token the
+  tool receives, which needed three things: an in-flight registry keyed by request
+  id, a **concurrent** stdio pump (sequential dispatch could only read the
+  cancellation after the call it meant to stop had finished), and remembering a
+  cancellation that arrives *before* the call it names. Proven by
+  `a_cancellation_notification_stops_the_call_it_names`,
+  `a_cancellation_that_arrives_first_is_not_lost`, and the transport-level
+  `a_cancellation_arrives_while_the_call_is_running`, which asserts the call stops
+  in under four of its five seconds.
+- **A store write did not know who wrote it.** `Store::set_as(&ctx, ..)` carries the
+  caller (defaulting to `set`); `InMemoryStore` and `FileStore` record the writer,
+  the file store in a `<path>.writers.json` sidecar so it survives a restart.
+  `todo-core`'s `create` uses it. Proven by `a_write_records_who_made_it`,
+  `an_anonymous_write_records_no_writer`, and
+  `a_writer_is_recorded_and_survives_a_reopen`.
 - **A hand-written HTTP handler.** `axum-outside-host`; see §3 for the limit.
   Proven by `axum_outside_a_host_is_a_finding` (a feature crate is a finding, a
   host crate importing the same path is not, and the framework's own transport is
@@ -288,9 +344,14 @@ config and no way to run it in a browser.
   way: observations and failures. A create-shaped success is covered by the client
   tests, which script the reply instead of repeating the call. Comparing creates
   would need per-case state snapshots, which the capability model does not expose.
-- **`--fix` covers two rules.** `over-broad-visibility` and the surface lock. Every
-  other finding needs a decision (move this type, split this function) and is
-  advice, because a tool that rewrites architecture is a tool nobody can review.
+- **`--fix` covers four rules** (`over-broad-visibility`, the surface lock, the
+  lints opt-in, a deleted threshold). The rest need a decision — move this type,
+  split this function, restore this ban — and stay advice, because a tool that
+  rewrites architecture is a tool nobody can review.
+- **The UI snapshots cover the view layer.** Not interaction, not layout, and not
+  the async containers (`use_resource` renders as "loading…", which would prove
+  nothing). A headless-browser test is the next step, and it is a host's dependency,
+  not the framework's.
 - **`unserved-contract` reads names.** It proves a host crate mentions the trait,
   not that it mounts an impl. The runtime half is the host's own test, which mounts
   and asserts on `exposed()`.
@@ -302,8 +363,9 @@ config and no way to run it in a browser.
 
 - A `Dioxus.toml` and a `wasm-bindgen` driver for one wasm host, so the browser
   story is a running page in the examples rather than in one app's `serve.sh`.
-- Extending the digest in the surface lock to definitions in *other* crates, which
-  means resolving `*-api` imports in the collector. The OpenAPI snapshot already
-  covers a service that builds the document; this would cover the rest.
-- Per-record attribution: threading `Ctx` into `Store` writes, so a store can say
-  who last touched a key.
+- Resolving the lock's hash *recursively*: today it follows a signature's named
+  types one level, so a field whose type is another struct is hashed by name.
+- An HTTP cancellation channel, if an agent ever needs to stop a route the way it
+  can stop a tool.
+- Persisting attribution for stores other than `FileStore`: the capability carries
+  the caller, and each impl decides whether to keep it.

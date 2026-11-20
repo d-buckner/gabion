@@ -206,6 +206,17 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             ));
         }
 
+        if let Some((output, _)) = result_args(&m.sig.output) {
+            if is_streaming(&output) {
+                return Err(syn::Error::new_spanned(
+                    &output,
+                    "streaming returns are not supported: #[service] builds four surfaces from \
+                     one signature, and none of them carries a stream in v1 (spec §10, still \
+                     open). Return a value, or take the streaming operation out of this trait. \
+                     This is a deliberate compile error rather than surfaces that cannot work.",
+                ));
+            }
+        }
         let Some((output, Some(error))) = result_args(&m.sig.output) else {
             return Err(syn::Error::new_spanned(
                 &m.sig.output,
@@ -227,6 +238,22 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
         });
     }
     Ok(methods)
+}
+
+/// A return type that would need a stream: `impl Trait` or `Stream`.
+///
+/// Checked here because every downstream generator assumes a value: the OpenAPI
+/// document asks schemars for a schema, the client parses one body, and the CLI
+/// renders one. A `Stream` in a trait method is also not dyn-compatible, so
+/// without this check the author gets an E0038 from generated code they did not
+/// write.
+fn is_streaming(output: &Type) -> bool {
+    use quote::ToTokens;
+    output
+        .to_token_stream()
+        .to_string()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|token| token == "impl" || token == "Stream")
 }
 
 /// `&Ctx`, `&gabion::Ctx`, `&crate::Ctx`: the type's last segment is what the

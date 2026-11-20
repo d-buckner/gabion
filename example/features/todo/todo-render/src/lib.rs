@@ -17,24 +17,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use gabion::prelude::Ctx;
 use todo_api::{CreateTodo, Todo, TodoErr, TodoId, TodoService};
-
-const CSS: &str = r#"
-body { font-family: ui-sans-serif, system-ui, sans-serif; background: #101014;
-       color: #e8e6e3; margin: 0; }
-main { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; }
-h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: .01em; }
-form { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
-input[type=text] { flex: 1; padding: .55rem .7rem; border-radius: .4rem;
-       border: 1px solid #2c2c34; background: #1a1a20; color: inherit; }
-button { padding: .55rem .9rem; border-radius: .4rem; border: 1px solid #3a3a44;
-       background: #26262e; color: inherit; cursor: pointer; }
-ul { list-style: none; padding: 0; margin: 0; }
-li { display: flex; align-items: center; gap: .6rem; padding: .5rem .2rem;
-       border-bottom: 1px solid #23232b; }
-li.done span { text-decoration: line-through; opacity: .5; }
-.err { color: #e06c75; }
-.muted { opacity: .5; font-size: .85rem; }
-"#;
+use ui_shared::{Empty, Failure, Heading, Surface};
 
 /// Service handle injected by the host through the launch context
 /// (`LaunchBuilder::with_context`). The UI only ever sees the trait — and the
@@ -80,7 +63,7 @@ impl Svc {
 #[component]
 pub(crate) fn TodoPanel(items: Vec<Todo>, on_toggle: EventHandler<TodoId>) -> Element {
     if items.is_empty() {
-        return rsx! { p { class: "muted", "nothing to do" } };
+        return rsx! { Empty { note: "nothing to do".to_string() } };
     }
     rsx! {
         ul {
@@ -135,16 +118,17 @@ pub fn TodoApp() -> Element {
     // re-renders whenever the list refetches. The match yields owned values,
     // so nothing borrows outlives the statement.
     let list_view = match todos() {
-        None => rsx! { p { class: "muted", "loading…" } },
-        Some(Err(e)) => rsx! { p { class: "err", "{e}" } },
+        None => rsx! { Empty { note: "loading…".to_string() } },
+        Some(Err(e)) => rsx! { Failure { message: e } },
         Some(Ok(items)) => rsx! { TodoPanel { items, on_toggle: toggle } },
     };
 
     rsx! {
-        style { dangerous_inner_html: CSS }
-        main {
-            h1 { "todo" }
+        style { dangerous_inner_html: ui_shared::CSS }
+        Surface {
+            Heading { title: "todo".to_string(), subtitle: None, actions: None }
             form {
+                class: "gb",
                 onsubmit: {
                     let svc = svc.clone();
                     move |evt| {
@@ -166,7 +150,7 @@ pub fn TodoApp() -> Element {
                     placeholder: "what needs doing?",
                     oninput: move |evt| title.set(evt.value()),
                 },
-                button { r#type: "submit", "add" }
+                button { r#type: "submit", class: "primary", "add" }
             }
             {list_view}
         }

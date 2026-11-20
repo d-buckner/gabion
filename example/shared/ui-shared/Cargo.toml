@@ -1,0 +1,18 @@
+[package]
+name = "ui-shared"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Shared UI kit: design tokens, surface, and the two states every panel has. Depends on the renderer, not on any feature."
+
+# The kit is a `*-shared` crate, so the edge table lets every `*-render` and every
+# host use it and lets it use the framework only. It must never name a feature: a
+# kit that knew about `todo` would be a feature, not a kit.
+
+[dependencies]
+# Dioxus core + signals only, like the render crates: the host picks the renderer.
+dioxus = { workspace = true, default-features = false, features = ["macro", "html", "signals", "hooks"] }
+
+[lints]
+workspace = true

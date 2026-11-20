@@ -6,7 +6,8 @@
 //! served by `gabion-native`'s stdio pump and by an axum route without the
 //! protocol existing twice.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
@@ -15,9 +16,26 @@ use crate::ctx::Ctx;
 use crate::error::ErrorKind;
 
 /// Every mounted service, answering JSON-RPC requests.
-#[derive(Default)]
+///
+/// Cloning a `Server` is cheap and shares the in-flight registry: a transport that
+/// serves requests concurrently (the stdio pump, an axum endpoint) clones it per
+/// task so a `notifications/cancelled` can reach a call that is still running.
+#[derive(Clone, Default)]
 pub struct Server {
     services: Vec<Arc<dyn Service>>,
+    /// Calls in flight, keyed by request id, so a cancellation notification can
+    /// find the one it names. Cancellation is a notification per the MCP spec, so
+    /// it carries no reply — the cancelled call answers for itself.
+    in_flight: Arc<Mutex<HashMap<String, Ctx>>>,
+    /// Cancellations that named a request this server has not started yet.
+    ///
+    /// Two requests are dispatched concurrently, so "cancel" can genuinely arrive
+    /// before "call" — measured: a client that gives up immediately after sending
+    /// hits that ordering every time. Dropping the notification would leave the
+    /// call running for its own timeout while the agent believes it stopped, so it
+    /// is remembered until the call registers. Bounded, because an id that never
+    /// arrives must not grow a map forever.
+    early_cancels: Arc<Mutex<Vec<String>>>,
 }
 
 impl Server {
@@ -56,6 +74,12 @@ impl Server {
         let id = envelope.get("id").cloned();
         let method = envelope.get("method").and_then(Value::as_str).unwrap_or("");
         let params = envelope.get("params").cloned().unwrap_or(Value::Null);
+        // Cancellation arrives as a notification, so it is handled before the
+        // "no id means no reply" rule — acting on it *is* the reply.
+        if method == "notifications/cancelled" {
+            self.cancel(&params);
+            return None;
+        }
         if id.is_none() || id == Some(Value::Null) {
             return None;
         }
@@ -63,7 +87,14 @@ impl Server {
         match method {
             "initialize" => Some(result(id, initialize())),
             "tools/list" => Some(result(id, json!({ "tools": self.tools_json() }))),
-            "tools/call" => Some(self.call(id, &params).await),
+            "tools/call" => {
+                let key = id.to_string();
+                let ctx = Ctx::from_meta(params.get("_meta").unwrap_or(&Value::Null));
+                self.remember(&key, &ctx);
+                let reply = self.call(id, &params, &ctx).await;
+                self.forget(&key);
+                Some(reply)
+            }
             "ping" => Some(result(id, json!({}))),
             other => Some(error_response(
                 id,
@@ -90,13 +121,68 @@ impl Server {
             .collect()
     }
 
-    async fn call(&self, id: Value, params: &Value) -> String {
+    /// How many early cancellations to hold. Enough for a client that gives up on a
+    /// burst of calls; small enough that an id nobody ever sends cannot leak.
+    const EARLY_CANCEL_CAP: usize = 32;
+
+    /// Record a call so a cancellation can find it — including one that arrived
+    /// before the call did.
+    fn remember(&self, key: &str, ctx: &Ctx) {
+        if let Ok(mut map) = self.in_flight.lock() {
+            map.insert(key.to_string(), ctx.clone());
+        }
+        let early = self.early_cancels.lock().ok().and_then(|mut prior| {
+            prior
+                .iter()
+                .position(|k| k == key)
+                .map(|at| prior.remove(at))
+        });
+        if early.is_some() {
+            ctx.cancel();
+        }
+    }
+
+    fn forget(&self, key: &str) {
+        if let Ok(mut map) = self.in_flight.lock() {
+            map.remove(key);
+        }
+    }
+
+    /// Cancel the call the notification names. A tool that observes
+    /// `ctx.cancel_token()` stops; one that does not keeps running, which is the
+    /// same contract as every other surface: cancellation is offered, not imposed.
+    fn cancel(&self, params: &Value) {
+        let Some(id) = params.get("requestId").or_else(|| params.get("request_id")) else {
+            return;
+        };
+        let key = id.to_string();
+        let ctx = self
+            .in_flight
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&key).cloned());
+        match ctx {
+            Some(ctx) => ctx.cancel(),
+            None => self.remember_early_cancel(key),
+        }
+    }
+
+    fn remember_early_cancel(&self, key: String) {
+        let Ok(mut early) = self.early_cancels.lock() else {
+            return;
+        };
+        if early.len() >= Self::EARLY_CANCEL_CAP {
+            early.remove(0);
+        }
+        early.push(key);
+    }
+
+    async fn call(&self, id: Value, params: &Value, ctx: &Ctx) -> String {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
         let args = params
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let ctx = Ctx::from_meta(params.get("_meta").unwrap_or(&Value::Null));
         let Some(service) = self
             .services
             .iter()
@@ -109,7 +195,7 @@ impl Server {
                 None,
             );
         };
-        match service.call(&ctx, name, args).await {
+        match service.call(ctx, name, args).await {
             Ok(value) => result(
                 id,
                 json!({
@@ -155,4 +241,146 @@ fn error_response(id: Value, code: i32, message: &str, data: Option<Value>) -> S
         map.insert("data".to_string(), data);
     }
     json!({ "jsonrpc": "2.0", "id": id, "error": error }).to_string()
+}
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the payload
+mod cancel_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+
+    use super::Server;
+    use crate::ctx::Ctx;
+    use crate::error::WireError;
+    use crate::mcp::{Service, Tool, ToolResult};
+
+    /// A tool that runs until it is cancelled, then reports it.
+    struct Slow;
+
+    impl Service for Slow {
+        fn ns(&self) -> &str {
+            "demo"
+        }
+
+        fn tools(&self) -> Vec<Tool> {
+            vec![Tool {
+                name: "demo.slow".to_string(),
+                description: "Runs until cancelled.".to_string(),
+                input_schema: json!({ "type": "object" }),
+            }]
+        }
+
+        fn call<'a>(&'a self, ctx: &'a Ctx, _name: &'a str, _args: Value) -> ToolResult<'a> {
+            Box::pin(async move {
+                let waited =
+                    tokio::time::timeout(Duration::from_secs(5), ctx.cancel_token().cancelled());
+                let cancelled = waited.await.is_ok();
+                Ok::<Value, WireError>(json!({ "cancelled": cancelled }))
+            })
+        }
+    }
+
+    fn server() -> Server {
+        Server::new().with(Arc::new(Slow))
+    }
+
+    /// The MCP way to stop a long tool call: a `notifications/cancelled` naming the
+    /// request id. The call answers itself with what it observed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancellation_notification_stops_the_call_it_names() {
+        let server = server();
+        let call = Clone::clone(&server);
+        let running = tokio::spawn(async move {
+            call.handle(
+                &json!({
+                    "jsonrpc":"2.0","id":7,"method":"tools/call",
+                    "params":{"name":"demo.slow","arguments":{}}
+                })
+                .to_string(),
+            )
+            .await
+        });
+
+        // Give the call a moment to register as in flight.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let reply = server
+            .handle(
+                &json!({
+                    "jsonrpc":"2.0","method":"notifications/cancelled",
+                    "params":{"requestId":7,"reason":"the user gave up"}
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(reply.is_none(), "a notification must not be answered");
+
+        let answered = running
+            .await
+            .expect("the call task finished")
+            .expect("a request with an id is answered");
+        let value: Value = serde_json::from_str(&answered).unwrap();
+        let text = value["result"]["content"][0]["text"].as_str().unwrap();
+        let observed: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            observed["cancelled"], true,
+            "the tool must see the cancellation: {value}"
+        );
+    }
+
+    /// The other ordering: the client gives up fast enough that the cancellation is
+    /// dispatched before the call it names. Dropping it would leave the call running
+    /// while the agent believes it stopped, so the server holds it until the call
+    /// registers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancellation_that_arrives_first_is_not_lost() {
+        let server = server();
+        let notification = json!({
+            "jsonrpc":"2.0","method":"notifications/cancelled",
+            "params":{"requestId":11}
+        })
+        .to_string();
+        assert!(server.handle(&notification).await.is_none());
+
+        let answered = server
+            .handle(
+                &json!({
+                    "jsonrpc":"2.0","id":11,"method":"tools/call",
+                    "params":{"name":"demo.slow","arguments":{}}
+                })
+                .to_string(),
+            )
+            .await
+            .expect("a request with an id is answered");
+        let value: Value = serde_json::from_str(&answered).unwrap();
+        let observed: Value =
+            serde_json::from_str(value["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            observed["cancelled"], true,
+            "a cancellation that beat the call must still stop it: {value}"
+        );
+    }
+
+    /// A cancellation for an id nobody is running is ignored, not an error: an agent
+    /// that gave up on a call that already finished must not get a failure for it.
+    #[tokio::test]
+    async fn cancelling_an_unknown_request_is_harmless() {
+        let server = server();
+        let reply = server
+            .handle(
+                &json!({
+                    "jsonrpc":"2.0","method":"notifications/cancelled",
+                    "params":{"requestId":999}
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(reply.is_none());
+        // The server still works afterwards.
+        let listed = server
+            .handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string())
+            .await
+            .unwrap();
+        assert!(listed.contains("demo.slow"));
+    }
 }

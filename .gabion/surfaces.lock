@@ -2,14 +2,14 @@
 # its signature and the same-crate types it names.
 # Reachable over CLI, HTTP, MCP and the typed client. Review changes here like
 # an API change: a changed hash is a changed input or output.
-checks-api::CheckService::add #a79f826a6cf5f7dc
-checks-api::CheckService::history #de7b9b395e2d964e
-checks-api::CheckService::list #3767d17953d4f167
-checks-api::CheckService::probe #9f6809f12a8df374
-checks-api::CheckService::sweep #8d57a6fc9d995e7b
-incidents-api::IncidentService::evaluate #3054fd6a4b7ffac5
-incidents-api::IncidentService::list #ec17081b925808ac
-incidents-api::IncidentService::uptime #64a7556a1d901e83
-todo-api::TodoService::complete #a2e7ab82fa1092e4
-todo-api::TodoService::create #56b9e8927e6c90ef
-todo-api::TodoService::list #2d23dea4ee2f9f72
+checks-api::CheckService::add #4e9aa58c775f99e8
+checks-api::CheckService::history #f2ad9e3d51743dcc
+checks-api::CheckService::list #cc326cafef980373
+checks-api::CheckService::probe #fdf74e6576bd71c2
+checks-api::CheckService::sweep #78d13adc372e6a17
+incidents-api::IncidentService::evaluate #e29ba7ec0d177f1b
+incidents-api::IncidentService::list #169a5fd3d181c2e8
+incidents-api::IncidentService::uptime #e79771a46779913b
+todo-api::TodoService::complete #58b7be8e90139188
+todo-api::TodoService::create #d1cd99ed102fe43d
+todo-api::TodoService::list #120043cee526c0b6

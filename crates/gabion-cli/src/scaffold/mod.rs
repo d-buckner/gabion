@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use crate::config::Config;
 
 use walls::svc_name;
-pub use walls::{add_members, clippy_toml, workspace_lints};
+pub use walls::{add_members, clippy_toml, remove_members, workspace_lints};
 
 /// Files to write, keyed by path relative to the workspace root.
 pub struct Scaffold {

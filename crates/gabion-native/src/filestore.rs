@@ -20,6 +20,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 struct Inner {
     path: PathBuf,
     map: Option<BTreeMap<String, String>>,
+    /// Who last wrote each key, loaded from the sidecar on first use.
+    ///
+    /// A sidecar file rather than part of the map: the map is the app's data and
+    /// must keep its shape (every value is a JSON string of the app's own type), so
+    /// attribution lives beside it as `<path>.writers.json`.
+    writers: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone)]
@@ -35,7 +41,11 @@ impl FileStore {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
         Ok(Self {
-            inner: Arc::new(Mutex::new(Inner { path, map: None })),
+            inner: Arc::new(Mutex::new(Inner {
+                path,
+                map: None,
+                writers: None,
+            })),
         })
     }
 }
@@ -64,6 +74,41 @@ impl Inner {
             .ok_or_else(|| StoreError::Io("store was not loaded".to_string()))
     }
 
+    /// The sidecar path: next to the store, named after it.
+    fn writers_path(&self) -> PathBuf {
+        let mut name = self.path.file_name().unwrap_or_default().to_os_string();
+        name.push(".writers.json");
+        self.path.with_file_name(name)
+    }
+
+    /// Who last wrote each key. A missing sidecar is an empty map — an app that has
+    /// never recorded a writer is not broken.
+    fn writers(&mut self) -> Result<&mut BTreeMap<String, String>, StoreError> {
+        if self.writers.is_none() {
+            let path = self.writers_path();
+            let parsed = match std::fs::read_to_string(&path) {
+                Ok(text) => {
+                    serde_json::from_str(&text).map_err(|e| StoreError::Io(e.to_string()))?
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+                Err(e) => return Err(StoreError::Io(e.to_string())),
+            };
+            self.writers = Some(parsed);
+        }
+        self.writers
+            .as_mut()
+            .ok_or_else(|| StoreError::Io("writers were not loaded".to_string()))
+    }
+
+    fn flush_writers(&mut self) -> Result<(), StoreError> {
+        let text = {
+            let writers = self.writers()?;
+            serde_json::to_string_pretty(writers).map_err(|e| StoreError::Io(e.to_string()))?
+        };
+        let path = self.writers_path();
+        std::fs::write(&path, text).map_err(|e| StoreError::Io(e.to_string()))
+    }
+
     fn flush(&mut self) -> Result<(), StoreError> {
         let text = {
             let map = self.map()?;
@@ -88,7 +133,31 @@ impl Store for FileStore {
     async fn delete(&self, key: &str) -> Result<(), StoreError> {
         let mut inner = lock(&self.inner);
         inner.map()?.remove(key);
-        inner.flush()
+        let had_writer = inner.writers()?.remove(key).is_some();
+        inner.flush()?;
+        if had_writer {
+            inner.flush_writers()?;
+        }
+        Ok(())
+    }
+
+    /// Records the caller beside the value, and survives a restart: the sidecar is
+    /// written with the map, so "who wrote this" is answerable after the process
+    /// that wrote it is gone.
+    async fn set_as(
+        &self,
+        ctx: &gabion::ctx::Ctx,
+        key: &str,
+        value: &str,
+    ) -> Result<(), StoreError> {
+        let Some(principal) = ctx.principal() else {
+            return self.set(key, value).await;
+        };
+        let mut inner = lock(&self.inner);
+        inner.map()?.insert(key.into(), value.into());
+        inner.writers()?.insert(key.into(), principal.to_string());
+        inner.flush()?;
+        inner.flush_writers()
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
@@ -99,5 +168,18 @@ impl Store for FileStore {
             .take_while(|(k, _)| k.starts_with(prefix))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect())
+    }
+}
+
+impl FileStore {
+    /// The principal that last wrote `key` through [`Store::set_as`], if any.
+    ///
+    /// Reads the sidecar, so it answers across restarts. `None` means the key has
+    /// no recorded writer — either it was written through [`Store::set`] by code
+    /// that had no caller, or it was never written.
+    #[must_use]
+    pub fn written_by(&self, key: &str) -> Option<String> {
+        let mut inner = lock(&self.inner);
+        inner.writers().ok()?.get(key).cloned()
     }
 }

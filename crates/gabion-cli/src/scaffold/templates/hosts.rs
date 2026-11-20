@@ -59,7 +59,7 @@ async fn main() {
     if std::env::args().any(|a| a == "--mcp-stdio") {
         match host().mcp() {
             Some(server) => {
-                if let Err(e) = gabion_native::mcp_stdio::serve_stdio(&server) {
+                if let Err(e) = gabion_native::mcp_stdio::serve_stdio(server) {
                     eprintln!("mcp stdio: {e}");
                     std::process::exit(1);
                 }
