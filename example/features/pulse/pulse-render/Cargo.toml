@@ -18,5 +18,9 @@ gabion = { workspace = true }
 # renderer, so this crate stays dual-target native + wasm.
 dioxus = { workspace = true, default-features = false, features = ["macro", "html", "signals", "hooks"] }
 
+[dev-dependencies]
+# The panel snapshot renders the published component to HTML.
+dioxus-ssr = "0.7"
+
 [lints]
 workspace = true

@@ -237,6 +237,12 @@ OpenAPI 3.1 document built from the same types the router deserializes, the exam
 commits it to `.gabion/openapi/todo.json`, and a test fails when the code and the
 committed document disagree.
 
+The UI gets the same treatment, because a component can keep its props and change
+what it shows: `.gabion/ui/` holds a committed snapshot per published panel
+(`todo-list.txt`, `todo-panel.html`, `board-panel.html`), rendered from fixture
+data and re-blessed with `GABION_BLESS_UI=1 cargo test`. A markup change is then a
+diff someone reads rather than a surprise on someone's screen.
+
 Every method takes the caller: `ctx: &Ctx` (principal, tenant, trace, cancellation)
 is the first parameter, and each surface fills it in — HTTP from headers, MCP from
 `_meta`, the CLI from `--principal` / `--tenant` / `--trace`, the client by
@@ -306,6 +312,11 @@ What it proves that the todo example cannot:
 - **The gate's own gaps are closed.** `over-broad-visibility`, `axum-outside-host`,
   `unserved-contract`, `no-wasm-proof`, `--fix` for mechanical findings, missing
   tools reported as a named SKIP, and `tests/` scanned by the shape rules.
+- **UIs compose.** `render -> render` is allowed, so two features can share a
+  screen; the wall moved to `over-broad-visibility`, which holds a render crate to
+  "`pub` means a component another feature may mount". Panels take props (data from
+  `*-api` plus callbacks), not service handles, and each published panel has a
+  committed HTML snapshot.
 - **The board is playable, not a screenshot.** Add a watch, sweep what is due,
   probe one now, evaluate outages, and watch uptime move — every button is a
   call on one of the two contracts, and the render crate still names no core.

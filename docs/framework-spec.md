@@ -311,6 +311,10 @@ Two deliberate deviations from the original plan:
   `WireError` the route sends. A case the suite cannot drive is a rejection, not a
   pass. It cannot compare a *create*: two calls are two creates, so the cases are
   the ones a repeat answers the same way (GAPS §8).
+- UI snapshots: every published panel is rendered from fixture data and compared
+  against a committed file in `.gabion/ui/` (text for the string view, HTML through
+  `dioxus-ssr` for components). The UI counterpart of the OpenAPI snapshot: a
+  component that keeps its props and changes what it shows is a diff someone reads.
 - `gabion check` = fmt + clippy + test + shear + deny + wasm-target build of
   core + the gabion-specific rules. One command, one exit code.
 - The gate is dogfooded: `crates/gabion-cli/tests/dogfood.rs` runs the real

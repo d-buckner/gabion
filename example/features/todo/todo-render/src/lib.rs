@@ -211,3 +211,76 @@ pub async fn on_add_clicked(
     )
     .await
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the markup
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)] // a snapshot test reads an env var and writes a file
+mod snapshot {
+    //! The published component, rendered to HTML and compared against a committed
+    //! file.
+    //!
+    //! This is the UI counterpart of `openapi_snapshot.rs`: a component can keep its
+    //! props and change what it shows, and nothing on the wire would notice. The
+    //! snapshot makes that a diff someone reads.
+    //!
+    //! Bless with `GABION_BLESS_UI=1 cargo test -p todo-render`.
+
+    use super::*;
+
+    /// The panel with fixture data, as a component: props are built inside a
+    /// runtime, which is where Dioxus allocates them.
+    #[component]
+    fn Fixture() -> Element {
+        let items = vec![
+            Todo {
+                id: "t1".into(),
+                title: "buy sandspice".into(),
+                done: false,
+                created_at: 1_700_000_000,
+            },
+            Todo {
+                id: "t2".into(),
+                title: "ship it".into(),
+                done: true,
+                created_at: 1_700_000_001,
+            },
+        ];
+        // The handler is a prop, and SSR renders the markup a handler cannot change,
+        // so a no-op is the honest fixture: this snapshots what the panel *shows*.
+        rsx! {
+            TodoPanel { items, on_toggle: move |_id: TodoId| {} }
+        }
+    }
+
+    fn html() -> String {
+        let mut dom = VirtualDom::new(Fixture);
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    fn path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../.gabion/ui/todo-panel.html")
+    }
+
+    #[test]
+    fn the_panel_markup_matches_the_committed_snapshot() {
+        let rendered = html();
+        let path = path();
+        if std::env::var("GABION_BLESS_UI").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &rendered).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "no snapshot at {}: {e}. Run `GABION_BLESS_UI=1 cargo test -p todo-render`,                  then read the diff.",
+                path.display()
+            )
+        });
+        assert_eq!(
+            rendered, committed,
+            "the panel markup changed. If it should have, re-bless and review the diff."
+        );
+    }
+}

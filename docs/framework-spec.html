@@ -351,6 +351,7 @@ flowchart TB
 <ul>
   <li>Core is pure → deterministic unit tests with <code>MockCaps</code> (fixed clock, in-memory store).</li>
   <li>Generated conformance suite: one case is driven through all four adapters (in-proc, clap dispatch, MCP tool call, generated client over a socket) and the four answers are compared — including the failure envelope, so an adapter that drops the kind or the detail fails. A case the suite cannot drive is a rejection, not a pass. It cannot compare a <em>create</em>: two calls are two creates, so the cases are the ones a repeat answers the same way.</li>
+  <li>UI snapshots: every published panel is rendered from fixture data and compared against a committed file in <code>.gabion/ui/</code> — text for the string view, HTML through <code>dioxus-ssr</code> for components. The UI counterpart of the OpenAPI snapshot, so a component that keeps its props and changes what it shows is a diff someone reads.</li>
   <li><code>fw check</code> closes its own gaps: <code>over-broad-visibility</code>, <code>axum-outside-host</code>, <code>unserved-contract</code>, <code>no-wasm-proof</code>, a signature hash in the surface lock, <code>tests/</code> scanned by the shape rules, and <code>--fix</code> for the findings that carry an exact text edit.</li>
 </ul>
 <div class="diagram">

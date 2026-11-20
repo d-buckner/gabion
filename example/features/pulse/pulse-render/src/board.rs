@@ -243,3 +243,125 @@ pub(crate) fn board_body(loaded: &Board, svc: &Svc, ui: Ui) -> Element {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the markup
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)] // a snapshot test reads an env var and writes a file
+mod snapshot {
+    //! The published panel, rendered to HTML and compared against a committed file.
+    //!
+    //! Same idea as `todo-render`'s panel snapshot and as `openapi_snapshot.rs` on
+    //! the wire: a component can keep its props and change what it shows, so the
+    //! markup is the artifact a reviewer reads. Bless with
+    //! `GABION_BLESS_UI=1 cargo test -p pulse-render`.
+
+    use super::*;
+    use checks_api::Check;
+    use incidents_api::Incident;
+
+    fn check(id: &str, name: &str, url: &str) -> Check {
+        Check {
+            id: id.into(),
+            name: name.into(),
+            url: url.into(),
+            interval_secs: 60,
+            timeout_ms: 2_000,
+            created_at: 1_700_000_000,
+        }
+    }
+
+    /// One watch answering, one in an outage: both branch of the row.
+    fn rows() -> Vec<CheckRow> {
+        vec![
+            CheckRow {
+                report: CheckReport {
+                    check: check("c1", "api", "https://example.com/health"),
+                    last: Some(checks_api::Probe {
+                        check_id: "c1".into(),
+                        at: 1_700_000_100,
+                        ok: true,
+                        status: 200,
+                        latency_ms: 12,
+                        attempts: 1,
+                        note: String::new(),
+                    }),
+                },
+                uptime: Some(Uptime {
+                    check_id: "c1".into(),
+                    probes: 4,
+                    ok: 3,
+                    pct: 75,
+                }),
+                open: None,
+            },
+            CheckRow {
+                report: CheckReport {
+                    check: check("c2", "melted", "http://127.0.0.1:9/"),
+                    last: Some(checks_api::Probe {
+                        check_id: "c2".into(),
+                        at: 1_700_000_200,
+                        ok: false,
+                        status: 0,
+                        latency_ms: 0,
+                        attempts: 3,
+                        note: "no answer".into(),
+                    }),
+                },
+                uptime: None,
+                open: Some(Incident {
+                    id: "i1".into(),
+                    check_id: "c2".into(),
+                    check_name: "melted".into(),
+                    opened_at: 1_700_000_150,
+                    closed_at: None,
+                    cause: "3 attempts, no answer".into(),
+                }),
+            },
+        ]
+    }
+
+    #[component]
+    fn Fixture() -> Element {
+        let incidents = rows()
+            .iter()
+            .filter_map(|r| r.open.clone())
+            .collect::<Vec<Incident>>();
+        rsx! {
+            BoardPanel {
+                rows: rows(),
+                incidents,
+                on_probe: move |_request: ProbeRequest| {},
+            }
+        }
+    }
+
+    fn path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../.gabion/ui/board-panel.html")
+    }
+
+    #[test]
+    fn the_panel_markup_matches_the_committed_snapshot() {
+        let mut dom = VirtualDom::new(Fixture);
+        dom.rebuild_in_place();
+        let rendered = dioxus_ssr::render(&dom);
+
+        let path = path();
+        if std::env::var("GABION_BLESS_UI").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &rendered).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "no snapshot at {}: {e}. Run `GABION_BLESS_UI=1 cargo test -p pulse-render`, \
+                 then read the diff.",
+                path.display()
+            )
+        });
+        assert_eq!(
+            rendered, committed,
+            "the board markup changed. If it should have, re-bless and review the diff."
+        );
+    }
+}
