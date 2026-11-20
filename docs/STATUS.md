@@ -1,6 +1,6 @@
 # Status
 
-v0.1, path-dependency only. The examples run end to end: the todo feature works
+v0.1, on crates.io. The examples run end to end: the todo feature works
 as a native binary with a file-backed store and as an HTTP server, `todo-core`
 compiles clean to wasm, and `gabion check` passes on this repo. The pulse monitor
 runs two features that call each other through a contract, over CLI, HTTP, MCP,
@@ -26,9 +26,7 @@ rule — including `over-broad-visibility`, `axum-outside-host`,
 
 Streaming surfaces (the refusal is built, the feature is the spec's open v1/v2
 question); an HTTP cancellation channel (MCP has one); `gabion host add`; a UI
-gallery; a renderer other than Dioxus; and any publish story — v0.1 is
-path-dependency only, so `gabion new` takes `--gabion-path` and points at a
-checkout.
+gallery; a renderer other than Dioxus.
 
 ## Claimed, with edges — and the doc says where
 

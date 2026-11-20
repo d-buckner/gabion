@@ -291,6 +291,8 @@ gabion — one business core, every surface
     shear, deny                              (--no-external to skip)
     wasm build of every *-core
 
+  --gabion-path PATH  only when developing against a gabion checkout: the scaffold
+                      depends on the published crates otherwise
   --fast              static rules only, no subprocesses
   --update-surfaces   rewrite the surface lock (the 'I meant to publish that' gesture)
   --fix               apply the mechanical findings (pub -> pub(crate), the lock)

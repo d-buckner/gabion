@@ -78,21 +78,46 @@ impl Scaffold {
     }
 }
 
+/// The two framework dependencies, in whichever form the caller asked for.
+///
+/// A path dep is for someone developing *against* gabion. The default is the
+/// published crate at this CLI's own version: the four crates ship together off
+/// one `[workspace.package]`, so the CLI's version is the framework's version,
+/// and a scaffold has no business guessing a range wider than the release it
+/// came from.
+fn framework_deps(gabion_path: Option<&Path>) -> String {
+    match gabion_path {
+        Some(root) => {
+            let root = root.display();
+            format!(
+                "gabion = {{ path = \"{root}/crates/gabion\" }}\n\
+                 gabion-native = {{ path = \"{root}/crates/gabion-native\" }}"
+            )
+        }
+        None => {
+            let version = env!("CARGO_PKG_VERSION");
+            format!("gabion = \"{version}\"\ngabion-native = \"{version}\"")
+        }
+    }
+}
+
 /// A whole app: workspace walls, one feature (api/core/render), two hosts.
 ///
-/// `gabion_path` is the directory holding the gabion crates — v0.1 is
-/// path-dependency only, so a scaffold has to know where the framework lives.
+/// `gabion_path` is a checkout of the gabion source tree. `None` — the default,
+/// and what `gabion new` uses unless `--gabion-path` says otherwise — has the
+/// scaffold depend on the published crates, which is what an app that did not
+/// come from a gabion checkout needs.
 #[must_use]
-pub fn app(name: &str, gabion_path: &Path, cfg: &Config) -> Scaffold {
+pub fn app(name: &str, gabion_path: Option<&Path>, cfg: &Config) -> Scaffold {
     let mut scaffold = Scaffold::new();
     let feature = "todo";
     let svc = svc_name(feature);
-    let gabion = gabion_path.display().to_string();
+    let deps = framework_deps(gabion_path);
     let fill = |body: &str| {
         body.replace("%NAME%", name)
             .replace("%FEATURE%", feature)
             .replace("%SVC%", &svc)
-            .replace("%GABION%", &gabion)
+            .replace("%GABION_DEPS%", &deps)
     };
     let members = [
         format!("features/{feature}/{feature}-api"),
@@ -201,6 +226,67 @@ pub fn feature(name: &str, feature: &str, cfg: &Config) -> Scaffold {
 mod tests {
     use super::*;
 
+    /// The gap this closes: a scaffold used to hard-code a path into a gabion
+    /// checkout, which a `cargo install`ed `gabion` cannot have — its fallback
+    /// was a build-time temp dir that no longer existed by the time anyone ran
+    /// it. The default is now the published crate.
+    #[test]
+    fn the_default_scaffold_depends_on_the_published_crates() {
+        let deps = framework_deps(None);
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(
+            deps.contains(&format!("gabion = \"{version}\"")),
+            "the scaffold must pin the framework to this CLI's version: {deps}"
+        );
+        assert!(
+            deps.contains(&format!("gabion-native = \"{version}\"")),
+            "both framework deps, not just one: {deps}"
+        );
+        assert!(
+            !deps.contains("path"),
+            "the default must not name a path: {deps}"
+        );
+        // And the whole manifest still parses with them in it.
+        let app = app("demo", None, &Config::default());
+        let manifest = app
+            .files
+            .get(Path::new("Cargo.toml"))
+            .expect("the scaffold writes a manifest");
+        let parsed: toml::Value = manifest.parse().expect("the default manifest parses");
+        assert_eq!(
+            parsed["workspace"]["dependencies"]["gabion"].as_str(),
+            Some(version),
+            "gabion must be a bare version requirement, not a table"
+        );
+    }
+
+    #[test]
+    fn a_gabion_path_still_scaffolds_path_deps() {
+        let deps = framework_deps(Some(Path::new("/src/gabion")));
+        assert!(
+            deps.contains("gabion = { path = \"/src/gabion/crates/gabion\" }"),
+            "developing against a checkout still means a path dep: {deps}"
+        );
+        assert!(
+            deps.contains("gabion-native = { path = \"/src/gabion/crates/gabion-native\" }"),
+            "both framework deps: {deps}"
+        );
+    }
+
+    /// A placeholder the fill step no longer substitutes survives as literal text
+    /// in somebody's generated Cargo.toml, so the templates must be clean.
+    #[test]
+    fn no_template_leaves_an_unsubstituted_gabion_placeholder() {
+        assert!(
+            !templates::ROOT_MANIFEST.contains("%GABION%"),
+            "the old %GABION% placeholder is still in the root manifest template"
+        );
+        assert!(
+            templates::ROOT_MANIFEST.contains("%GABION_DEPS%"),
+            "the root manifest lost its deps placeholder"
+        );
+    }
+
     #[test]
     fn the_clippy_config_carries_every_ban_the_gate_requires() {
         let cfg = Config::default();
@@ -237,7 +323,7 @@ mod tests {
     #[test]
     fn a_scaffold_writes_a_parseable_workspace() {
         let cfg = Config::default();
-        let app = app("demo", Path::new("/framework"), &cfg);
+        let app = app("demo", Some(Path::new("/framework")), &cfg);
         let manifest = app
             .files
             .get(Path::new("Cargo.toml"))
