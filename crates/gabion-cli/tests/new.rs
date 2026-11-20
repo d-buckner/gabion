@@ -257,3 +257,74 @@ fn dev_once_runs_the_command_and_reports_its_status() {
     assert_eq!(code, std::process::ExitCode::FAILURE);
     assert!(failed.failed_steps.iter().any(|s| s.contains("exited 3")));
 }
+
+/// `gabion feature remove` takes back the crates, the members, and the published
+/// operations — and refuses when a host still depends on the feature, because the
+/// workspace it would leave could not build.
+#[test]
+fn a_feature_can_be_removed_again() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().join("demo");
+    new_app(&root, "demo");
+    let add = vec![
+        "feature".to_string(),
+        "add".to_string(),
+        "billing".to_string(),
+        "--root".to_string(),
+        root.display().to_string(),
+    ];
+    let (added, _) = cli::run(&add);
+    assert!(added.ok(), "{:?}", added.failed_steps);
+
+    // A host that names the feature: removal must refuse, not leave a broken
+    // workspace behind.
+    let host_manifest = root.join("hosts/demo-host-server/Cargo.toml");
+    let original = std::fs::read_to_string(&host_manifest).unwrap();
+    std::fs::write(
+        &host_manifest,
+        original.replace(
+            "[dependencies]",
+            "[dependencies]\ndemo-billing-api = { path = \"../../features/billing/billing-api\" }",
+        ),
+    )
+    .unwrap();
+    let remove: Vec<String> = vec![
+        "feature".to_string(),
+        "remove".to_string(),
+        "billing".to_string(),
+        "--root".to_string(),
+        root.display().to_string(),
+    ];
+    let (refused, _) = cli::run(&remove);
+    assert!(!refused.ok(), "a depended-on feature must not be removed");
+    assert!(
+        refused
+            .failed_steps
+            .iter()
+            .any(|s| s.contains("still depends")),
+        "{:?}",
+        refused.failed_steps
+    );
+    assert!(
+        root.join("features/billing").exists(),
+        "the crates must remain"
+    );
+
+    // With the dependency gone, the removal succeeds and the gate is clean: the
+    // operations left the lock with the crates.
+    std::fs::write(&host_manifest, original).unwrap();
+    let (removed, _) = cli::run(&remove);
+    assert!(removed.ok(), "{:?}", removed.failed_steps);
+    assert!(!root.join("features/billing").exists());
+
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(!manifest.contains("features/billing/"), "{manifest}");
+    let lock = std::fs::read_to_string(root.join(".gabion/surfaces.lock")).unwrap();
+    assert!(!lock.contains("BillingService"), "{lock}");
+    let after = check(&root);
+    assert!(
+        after.ok(),
+        "the app must be clean again:\n{}",
+        findings(&after)
+    );
+}

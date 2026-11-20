@@ -67,9 +67,11 @@ pub fn add_members(manifest: &str, members: &[String]) -> Result<String, String>
         .map(|i| open + i)
         .ok_or("the `members` list is not closed")?;
     let mut body = manifest.to_string();
-    let mut insertion = String::new();
-    for member in members {
-        insertion.push_str(&format!("\n    \"{member}\","));
+    // One entry per line, and the closing bracket keeps its own line: a line-based
+    // edit (and a human reading the diff) both depend on that.
+    let mut insertion: String = members.iter().map(|m| format!("    \"{m}\",\n")).collect();
+    if !body[..close].ends_with('\n') {
+        insertion.insert(0, '\n');
     }
     body.insert_str(close, &insertion);
     let parsed: toml::Value = body
@@ -96,4 +98,39 @@ pub(crate) fn svc_name(feature: &str) -> String {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => feature.to_string(),
     }
+}
+
+/// Remove paths from the workspace `members` array, textually, and verify the
+/// result still parses.
+///
+/// A member that is not listed is not an error: `gabion feature remove` is also how
+/// someone cleans up a half-added feature, and refusing that would mean hand-editing
+/// the manifest anyway.
+pub fn remove_members(manifest: &str, members: &[String]) -> Result<String, String> {
+    let wanted: Vec<String> = members.iter().map(|m| format!("\"{m}\"")).collect();
+    let mut out: Vec<String> = Vec::new();
+    for line in manifest.lines() {
+        let closes = line.trim_end().ends_with(']');
+        let trimmed = line.trim().trim_end_matches(']').trim_end_matches(',');
+        if wanted.iter().any(|w| w == trimmed) {
+            // Dropping the entry must not drop the bracket it shared a line with.
+            if closes {
+                out.push("]".to_string());
+            }
+            continue;
+        }
+        // A removed entry must not leave a gap behind it.
+        if line.trim().is_empty()
+            && out
+                .last()
+                .is_some_and(|prev: &String| prev.trim().is_empty())
+        {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    let body = out.join("\n") + "\n";
+    body.parse::<toml::Value>()
+        .map_err(|e| format!("removing members left the manifest unparseable: {e}"))?;
+    Ok(body)
 }

@@ -25,6 +25,11 @@ pub fn run(args: &[String]) -> (Summary, ExitCode) {
             let code = exit_for(&summary);
             (summary, code)
         }
+        Ok(Args::FeatureRemove(opts)) => {
+            let summary = crate::commands::remove_feature(&opts);
+            let code = exit_for(&summary);
+            (summary, code)
+        }
         Ok(Args::Dev(opts)) => {
             let summary = crate::commands::dev(&opts);
             let code = exit_for(&summary);
@@ -60,6 +65,7 @@ pub enum Args {
     Check(Options),
     New(NewOptions),
     FeatureAdd(FeatureOptions),
+    FeatureRemove(FeatureOptions),
     Dev(crate::dev::Options),
     Help,
 }
@@ -121,11 +127,14 @@ impl Args {
 
     fn parse_feature(rest: &[String]) -> Result<Args, String> {
         let Some(sub) = rest.first() else {
-            return Err("`gabion feature` needs a subcommand: add <name>".to_string());
+            return Err(
+                "`gabion feature` needs a subcommand: add <name> | remove <name>".to_string(),
+            );
         };
-        if sub != "add" {
+        if sub != "add" && sub != "remove" {
             return Err(format!("unknown `feature` subcommand `{sub}`"));
         }
+        let removing = sub == "remove";
         let name = rest
             .get(1)
             .ok_or("`gabion feature add` needs a name: gabion feature add billing")?;
@@ -142,10 +151,14 @@ impl Args {
             }
             i += 1;
         }
-        Ok(Args::FeatureAdd(FeatureOptions {
+        let options = FeatureOptions {
             name: name.clone(),
             root,
-        }))
+        };
+        if removing {
+            return Ok(Args::FeatureRemove(options));
+        }
+        Ok(Args::FeatureAdd(options))
     }
 
     fn parse_dev(rest: &[String]) -> Result<Args, String> {
@@ -255,6 +268,7 @@ gabion — one business core, every surface
 
   gabion new <name> [--dir PATH] [--gabion-path PATH]
   gabion feature add <name> [--root PATH]
+  gabion feature remove <name> [--root PATH]
   gabion dev [--once] [--run CMD] [--host PKG] [--interval MS] [--root PATH]
   gabion check [--fast] [--no-external] [--update-surfaces] [--fix]
                [--allow-missing-tools] [--root PATH] [--target TRIPLE]

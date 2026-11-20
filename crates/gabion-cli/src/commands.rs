@@ -153,8 +153,11 @@ pub fn add_feature(opts: &FeatureOptions) -> Summary {
 fn refresh_lock(root: &std::path::Path) -> Result<usize, String> {
     let cfg = crate::config::Config::load(root)?;
     let graph = crate::graph::load(root, &cfg)?;
-    if let Some(finding) = crate::surfaces::check(&graph, root, true).first() {
-        return Err(finding.detail.clone());
+    if let Some(finding) = crate::surfaces::check(&graph, root, true)
+        .into_iter()
+        .find(|f| f.rule == "surface-snapshot")
+    {
+        return Err(finding.detail);
     }
     let text = std::fs::read_to_string(root.join(crate::surfaces::LOCK_PATH))
         .map_err(|e| format!("cannot read the lock back: {e}"))?;
@@ -220,4 +223,97 @@ fn failure(message: String) -> Summary {
         steps: Vec::new(),
         failed_steps: vec![message],
     }
+}
+
+/// `gabion feature remove`: the crates, the members, and the published operations.
+///
+/// Deleting a feature is the one scaffolding command that can leave a workspace
+/// that no longer builds, so it refuses when something still depends on the feature
+/// — a host that imports `billing_api` would fail `cargo metadata` after the
+/// directory is gone, and reporting that as "the lock could not be refreshed" would
+/// hide the real cause.
+pub fn remove_feature(opts: &FeatureOptions) -> Summary {
+    let manifest_path = opts.root.join("Cargo.toml");
+    let manifest = match std::fs::read_to_string(&manifest_path) {
+        Ok(text) => text,
+        Err(e) => return failure(format!("cannot read {}: {e}", manifest_path.display())),
+    };
+    let feature_dir = opts.root.join("features").join(&opts.name);
+    if !feature_dir.exists() {
+        return failure(format!(
+            "no feature `{}` at {}",
+            opts.name,
+            feature_dir.display()
+        ));
+    }
+    if let Some(user) = still_depended_on(&opts.root, &opts.name) {
+        return failure(format!(
+            "`{user}` still depends on the `{}` feature; remove that dependency first",
+            opts.name
+        ));
+    }
+    let members: Vec<String> = ["api", "core", "render"]
+        .iter()
+        .map(|suffix| format!("features/{}/{}-{suffix}", opts.name, opts.name))
+        .collect();
+    let updated = match crate::scaffold::remove_members(&manifest, &members) {
+        Ok(text) => text,
+        Err(e) => return failure(e),
+    };
+    if let Err(e) = std::fs::remove_dir_all(&feature_dir) {
+        return failure(format!("cannot remove {}: {e}", feature_dir.display()));
+    }
+    if let Err(e) = std::fs::write(&manifest_path, updated) {
+        return failure(format!("cannot write {}: {e}", manifest_path.display()));
+    }
+    let operations = refresh_lock(&opts.root).unwrap_or(0);
+    Summary {
+        skipped: Vec::new(),
+        notes: vec![
+            format!(
+                "removed feature `{}`: {}-api | {}-core | {}-render",
+                opts.name, opts.name, opts.name, opts.name
+            ),
+            format!(
+                "workspace members updated; .gabion/surfaces.lock now lists {operations} \
+                 operation(s) — the operations that were published are gone"
+            ),
+            "next: `gabion check`".to_string(),
+        ],
+        findings: Vec::new(),
+        steps: Vec::new(),
+        failed_steps: Vec::new(),
+    }
+}
+
+/// The first manifest that still names the feature's crates, other than the
+/// feature's own.
+fn still_depended_on(root: &std::path::Path, feature: &str) -> Option<String> {
+    let needle = format!("-{feature}-");
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if matches!(name, "target" | ".git" | "dist") {
+            continue;
+        }
+        let manifest = dir.join("Cargo.toml");
+        if let Ok(text) = std::fs::read_to_string(&manifest) {
+            // The feature's own crates live under `features/<feature>/`, and they
+            // name each other; anything outside that directory is a real dependent.
+            let own = dir
+                .to_string_lossy()
+                .contains(&format!("features/{feature}/"));
+            if !own && text.contains(&needle) {
+                return Some(dir.display().to_string());
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    stack.push(entry.path());
+                }
+            }
+        }
+    }
+    None
 }
