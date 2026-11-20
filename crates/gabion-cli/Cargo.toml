@@ -2,11 +2,13 @@
 name = "gabion-cli"
 version.workspace = true
 edition.workspace = true
-# v0.1 ships as a git/path dependency; not published to crates.io yet.
-publish = false
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+readme.workspace = true
 description = "gabion check: one command, one exit code. Orchestrates clippy + fmt + cargo-shear + cargo-deny + wasm builds, and adds the three rules no existing linter can express."
+keywords = ["cli", "linter", "codegen", "ci", "scaffolding"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "gabion"
