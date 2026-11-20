@@ -12,8 +12,7 @@
 #[allow(clippy::unwrap_used)] // spec bans unwrap in *-core; host main is bootstrap
 async fn main() {
     if std::env::args().any(|a| a == "--mcp-stdio") {
-        let (checks, incidents) = host_pulse_server::services();
-        let server = host_pulse_server::mcp(checks, incidents);
+        let server = host_pulse_server::mcp();
         if let Err(e) = gabion_native::mcp_stdio::serve_stdio(&server) {
             eprintln!("mcp stdio: {e}");
             std::process::exit(1);

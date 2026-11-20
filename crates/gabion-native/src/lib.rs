@@ -28,7 +28,7 @@ pub mod mcp_http;
 /// `gabion` must stay wasm-safe and this needs a file descriptor.
 pub mod mcp_stdio;
 #[cfg(feature = "server")]
-pub use mcp_http::mcp_router;
+pub use mcp_http::{boxed_commands, host_router, mcp_router};
 
 /// OS entropy — the native impl of `Random`.
 #[derive(Clone)]

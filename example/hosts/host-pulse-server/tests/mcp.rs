@@ -119,8 +119,7 @@ async fn a_notification_gets_no_content() {
 /// protocol is not re-implemented per transport.
 #[test]
 fn the_stdio_transport_answers_the_same_server() {
-    let (checks, incidents) = host_pulse_server::services();
-    let server = host_pulse_server::mcp(checks, incidents);
+    let server = host_pulse_server::mcp();
     let input = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",

@@ -66,6 +66,21 @@ async fn seed(checks: &dyn CheckService) {
     }
 }
 
+/// What this page can call, straight from the contracts.
+///
+/// The registry is an inherent method on the trait object rather than a
+/// linker-collected slice, so it works here — a browser build has no linker
+/// sections to collect and no composition root to run twice. A board that can say
+/// which operations it holds is a board you can audit.
+#[wasm_bindgen]
+pub fn exposed_ops() -> String {
+    let board = services(WebCaps::new());
+    let mut host = gabion::registry::Host::new();
+    board.checks.mount_on(&mut host);
+    board.incidents.mount_on(&mut host);
+    host.exposed().join(",")
+}
+
 /// Browser entry: seed a fresh origin, then launch the same status board the
 /// desktop host shows, with the services injected through the launch context.
 #[wasm_bindgen(start)]

@@ -29,10 +29,12 @@ use quote::{format_ident, quote};
 mod cli;
 mod client;
 mod mcp;
+mod registry;
 mod server;
 use cli::gen_cli;
 use client::gen_client;
 use mcp::gen_mcp;
+use registry::gen_registry;
 use server::gen_server;
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
 
@@ -141,12 +143,14 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let cli = gen_cli(&c);
     let client = gen_client(&c);
     let mcp = gen_mcp(&c);
+    let registration = gen_registry(&c);
     Ok(quote! {
         #cleaned
         #server
         #cli
         #client
         #mcp
+        #registration
     })
 }
 

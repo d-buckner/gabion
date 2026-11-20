@@ -13,7 +13,7 @@ description = "incidents feature contract: wire types + #[service] trait. Compil
 # be handed a remote impl instead of an in-process one and cannot tell the
 # difference. On by default — a contract with no client is a contract a wasm
 # renderer cannot call.
-default = ["client"]
+default = ["client", "registry"]
 client = []
 server = ["dep:axum", "dep:bytes"]
 cli = ["dep:clap"]
@@ -26,6 +26,10 @@ openapi = ["server"]
 # The generated agreement suite drives one impl through every adapter, which
 # means all of them have to be compiled.
 conformance = ["server", "cli", "mcp", "client"]
+# Automatic registration: `mount_on` on the trait object, so a host mounts an
+# impl and gets this contract's routes, subcommand and tools with it. No linker
+# tricks, and it works on wasm — see `gabion::registry`.
+registry = []
 
 [dependencies]
 gabion = { workspace = true }

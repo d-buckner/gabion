@@ -11,6 +11,7 @@ pub mod ctx;
 pub mod error;
 pub mod mcp;
 pub mod openapi;
+pub mod registry;
 pub mod testing;
 
 pub use ctx::Ctx;

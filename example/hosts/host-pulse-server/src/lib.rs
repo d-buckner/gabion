@@ -1,8 +1,10 @@
 //! Server host: two generated routers on one app, one MCP endpoint over the same
 //! two impls, and the contract documents they describe.
 //!
-//! The whole crate is wiring — build the caps, build the impls, mount what
-//! `#[service]` generated. Nothing here knows what a watch or an incident is.
+//! The whole crate is wiring — build the caps, choose the impls, mount them.
+//! Nothing here knows what a watch or an incident is, and nothing here names a
+//! route: `mount_on` brings the routes, the tools and the op list from the
+//! contract.
 
 use axum::routing::get;
 use axum::Json;
@@ -21,36 +23,41 @@ pub type Incidents = Arc<dyn IncidentService + Send + Sync>;
 /// checks impl because the two features share a store, not an instance.
 pub fn services() -> (Checks, Incidents) {
     let caps = gabion_native::NativeCaps::new();
-    let checks: Arc<dyn CheckService + Send + Sync> = Arc::new(CheckServiceImpl::new(caps.clone()));
-    let incidents: Arc<dyn IncidentService + Send + Sync> = Arc::new(IncidentServiceImpl::new(
+    let checks: Checks = Arc::new(CheckServiceImpl::new(caps.clone()));
+    let incidents: Incidents = Arc::new(IncidentServiceImpl::new(
         caps.clone(),
         CheckServiceImpl::new(caps),
     ));
     (checks, incidents)
 }
 
-/// One app, both services, on every surface the process serves: HTTP routes, the
-/// MCP endpoint, and the OpenAPI documents that describe the routes an agent's
-/// tool list came from.
-pub fn app() -> axum::Router {
+/// Everything this host serves, from the two lines that choose the impls.
+pub fn host() -> gabion::registry::Host {
     let (checks, incidents) = services();
-    let mcp = Arc::new(mcp(checks.clone(), incidents.clone()));
-
-    axum::Router::new()
-        .merge(checks_api::__check_server::check_router(checks))
-        .merge(incidents_api::__incident_server::incident_router(incidents))
-        .merge(gabion_native::mcp_router(mcp))
-        .route("/openapi.json", get(contract))
+    let mut host = gabion::registry::Host::new();
+    checks.mount_on(&mut host);
+    incidents.mount_on(&mut host);
+    host
 }
 
-/// Both services as tools, over the same impls the routes serve — so an agent and
-/// a browser call the same business logic, not two code paths that agree today.
-pub fn mcp(checks: Checks, incidents: Incidents) -> gabion::mcp::Server {
-    gabion::mcp::Server::new()
-        .with(Arc::new(checks_api::__check_mcp::check_mcp(checks)))
-        .with(Arc::new(incidents_api::__incident_mcp::incident_mcp(
-            incidents,
-        )))
+/// One app, both services, on every surface the process serves: the generated
+/// routes, the MCP endpoint, and the OpenAPI documents that describe the routes
+/// an agent's tool list came from.
+pub fn app() -> axum::Router {
+    gabion_native::host_router(&mut host()).route("/openapi.json", get(contract))
+}
+
+/// The same services as one MCP server, for the stdio transport.
+///
+/// # Panics
+/// Only if the api crates were built without `mcp`, which this crate's manifest
+/// requires — a host that mounts a contract and then has no tools is a build
+/// error here, not a runtime surprise: see `tests/registry.rs`.
+pub fn mcp() -> gabion::mcp::Server {
+    match host().mcp() {
+        Some(server) => server,
+        None => panic!("this host requires the api crates' `mcp` feature"),
+    }
 }
 
 /// The same documents the snapshot tests commit, served from the process that

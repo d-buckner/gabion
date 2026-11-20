@@ -41,6 +41,35 @@ async fn handle(State(server): State<Arc<Server>>, body: String) -> axum::respon
     }
 }
 
+/// The whole app a server host serves: every mounted router, plus the MCP
+/// endpoint when the host's api crates were built with `mcp`.
+///
+/// The downcasts are here rather than in the host because the host should not
+/// have to know that a generated router is an `axum::Router` — it mounted an impl
+/// and asked what it serves.
+pub fn host_router(host: &mut gabion::registry::Host) -> axum::Router {
+    let mcp = host.mcp();
+    let mut app = axum::Router::new();
+    for boxed in host.routers() {
+        if let Ok(router) = boxed.downcast::<axum::Router>() {
+            app = app.merge(*router);
+        }
+    }
+    match mcp {
+        Some(server) => app.merge(mcp_router(Arc::new(server))),
+        None => app,
+    }
+}
+
+/// Every mounted subcommand, for a host that builds one clap tree over several
+/// services. Boxed on the way in for the same reason routers are: the registry
+/// cannot name `clap`, and this module could — but a host that wants a CLI is the
+/// one that has one, so the downcast stays there.
+#[must_use]
+pub fn boxed_commands(host: &mut gabion::registry::Host) -> Vec<Box<dyn std::any::Any + Send>> {
+    host.commands()
+}
+
 /// The same server, answering a request a host received some other way (a test,
 /// a websocket, an embedded webview). No axum types, so a host that serves JSON-RPC
 /// elsewhere does not have to route it through this module.
