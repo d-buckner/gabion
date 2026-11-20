@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pulse</title>
+    <style>
+      html { background: #101014; }
+      body { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <!-- Dioxus looks for this id (its default rootname) and mounts the board
+         inside it; without it, dioxus-web silently mounts to a detached node. -->
+    <div id="main"></div>
+    <!-- The wasm module carries its own entry point (wasm_bindgen(start)):
+         `init()` seeds a fresh origin and launches the Dioxus board. -->
+    <script type="module">
+      import init from "./pkg/pulse_web.js";
+      init().catch((error) => {
+        document.body.innerHTML =
+          '<pre style="color:#e06c75;font:12px ui-monospace;padding:1.25rem;white-space:pre-wrap">' +
+          String(error) +
+          "</pre>";
+      });
+    </script>
+  </body>
+</html>

@@ -43,12 +43,16 @@ real server and a real route, not against a client that is not built.
 | Claim | Reality |
 |---|---|
 | "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so, and spec §5 marks each generated artifact as built or not built. |
+| auto-registration via `linkme` (spec §4) | Not built. Every host wires its routers and clap subcommands by hand; the spec now says so. |
+| "the wasm target fails on `std::fs` / `std::net` / `std::thread` / `tokio`" (README Layer 2, spec §3/§7) | False on the pinned toolchain: `std` ships wasm stubs (`std::fs`, `std::net`, `std::thread`, `std::time` all compile and link for `wasm32-unknown-unknown`), and tokio's `rt` feature builds there. The effect wall is the `clippy.toml` ban list plus the `core-runtime-dep` rule; the wasm step still catches crates that genuinely cannot build (tokio `net` via mio). |
 | cargo-mend-style visibility check (spec §7) | Not built. `pub` past the wall is unpoliced. |
+| axum importable only in generated modules + host mains (spec §7) | Not built. Nothing inspects `use axum` yet. |
 | Generated conformance suite across all four adapters (spec §8) | Not built. `TodoServiceImpl` is exercised through clap and axum by hand, never checked for agreement. |
 | `gabion dev` (spec §9) | Not built. |
+| a `*-core` that names a runtime outside the banned list | `core-runtime-dep` reads an enumerated list (`tokio`, `axum`, `reqwest`, `sqlx`, …). A crate outside it gets through, and so does any effect outside `clippy.toml`'s enumerated paths. That is a wall with edges, not a proof. |
 
-Two rows that were here are closed and recorded in §7: `unsafe_code = "forbid"`
-workspace-wide, the glob re-export wall, and the OpenAPI envelope.
+The earlier rows about `unsafe_code = "forbid"` workspace-wide, the glob re-export
+wall, and the OpenAPI envelope are closed and recorded in §7.
 
 ## 4. Not built
 
@@ -56,19 +60,33 @@ workspace-wide, the glob re-export wall, and the OpenAPI envelope.
   and hoping it copies the walls too. This is the gap that most limits the
   framework being used by anyone else.
 - **MCP surface**, **generated typed client** (`InProcess` + `Http` impls).
+- **Automatic surface registration** (`linkme` distributed slice, spec §4) — hosts
+  wire routers and subcommands explicitly today.
+- **`gabion feature add`** — members are added to the workspace by hand.
 - **Per-call `Ctx`** (principal, tenant, trace-id, cancellation) — decided, not
   implemented. Until it lands, no surface can carry a caller identity, so
   authorization is unrepresentable.
 
-## 5. Compile-proof, not shipped
+## 5. Browser and desktop, shipped for one app
 
-`example/hosts/host-web` and `example/hosts/host-pulse-web` build for
-`wasm32-unknown-unknown` and are wired with a fixed clock and an in-memory store
-(`TestCaps`, which is what the unit tests run on). There is no bundler config
-(`Dioxus.toml`), no `wasm-bindgen` driver, and no way to run either in a browser.
-They prove the render crates are wasm-clean; they are not browser apps. The
-signed-off posture for the browser is a thin client over HTTP (spec §10), which is
-also not built.
+`example/hosts/host-pulse-native` and `example/hosts/host-pulse-web` are runnable
+apps, not compile proofs. Both run the unchanged `checks-core` and
+`incidents-core` and show `pulse-render`: the desktop host over `FileCaps` (state
+in `$PULSE_STORE`), the web host over a real `WebCaps` (js clock, localStorage
+store, `crypto.getRandomValues`, `setTimeout` timers, `fetch` http), served with
+`example/hosts/host-pulse-web/serve.sh`. First run seeds two demo watches so
+there is something to sweep.
+
+What the browser build comes with, and the doc says so rather than hiding it:
+`fetch` is CORS-bound, so a probe target that sends no
+`Access-Control-Allow-Origin` fails as a transport error; localStorage is
+per-origin; and the browser http capability drops response headers (v1 carries
+JSON bodies). The thin-client-over-HTTP posture (spec §10.3) is still not built:
+apps that want server-side probes have no generated client yet.
+
+`example/hosts/host-web` (todo) remains what this section used to describe for
+both apps: a `TestCaps` wall proof with no bundler config and no way to run it in
+a browser.
 
 ## 6. Deliberate allowances (not gaps, but they look like gaps)
 
@@ -101,7 +119,7 @@ also not built.
   the generated HTTP surface emits `WireError` for *every* failure including a
   body that will not parse. A client that knows the app's error enum recovers
   the typed error; one that does not still gets kind and message. Proven by
-  `crates/gabion/src/error.rs` tests and by `POST /todo/complete` on a missing
+  `crates/gabion/src/error.rs` tests and by `POST /api/todo.complete` on a missing
   id.
   Deviation from the signed-off plan: the conversions are generic impls in the
   runtime rather than code the macro generates per service — same effect, less
@@ -168,8 +186,8 @@ also not built.
   sleeps past the deadline, because virtual time moves only on a wait. That is the
   rule tokio's own virtual time follows, and it is documented at `timeout`.
 - **A core could not call another service.** The feature wall says cross-feature
-  calls go through the generated client, and there was no capability for that call
-  to travel on. `Caps::http` is an `Http` trait over `HttpRequest`, `HttpResponse`
+  calls go through the other feature's contract (and, once it is built, the
+  generated client), and there was no capability for that call to travel on. `Caps::http` is an `Http` trait over `HttpRequest`, `HttpResponse`
   and `HttpError`: a method, a URL, headers, bytes. Native: `ReqwestHttp` with
   rustls, so the single-binary promise holds and no system openssl is needed.
   Tests: `MockHttp` replays scripted routes and records what was sent; a call
@@ -209,6 +227,23 @@ also not built.
   `contract-glob` rule reads the contract crates and names a `pub use` whose tree
   contains a glob. Proven by `a_glob_reexport_in_a_contract_is_a_finding`, and the
   glob sits in the `every_rule_bites` fixture so the rule cannot go quiet.
+- **The spec's wire decision did not match the wire.** Spec §5 said
+  `POST /api/todo.create` and a `Result<T, E>` envelope; the macro served
+  `POST /todo/create` and returned the bare value on 200 (`WireError` only on
+  failure). The code was wrong about the route and the spec was wrong about the
+  envelope. `route()` in `gabion-macros` now computes `/api/{feature}.{method}`
+  (one place, shared by the router and OpenAPI), the three committed documents
+  were regenerated, and the route tests were updated. The spec now states the
+  bare-value-on-200 shape that the generated handlers already produced.
+- **The effect wall was credited to the wrong gate.** README Layer 2 and spec
+  §3/§7 said `std::fs`, `std::net`, `std::thread`, and `tokio` fail to build for
+  wasm. They build: `std` ships wasm stubs for fs/net/thread/time, and tokio's
+  `rt` feature compiles for `wasm32-unknown-unknown` (both verified on the pinned
+  toolchain with a scratch crate). The ban is real, but it is `clippy.toml`'s
+  enumerated paths plus a new `core-runtime-dep` rule that reads every `*-core`
+  manifest for runtime/server/client/storage crates. Proven by
+  `a_runtime_in_a_core_is_a_finding_but_a_host_may_have_one` and by the core
+  fixture in `every_rule_bites`. The remaining edges are recorded in §3.
 - **An app could loosen the audit that audits it.** README says an app may tighten
   the clippy thresholds through `max-thresholds`, and that the gate only ever
   tightens them. `Config::apply` took the app's value outright, so

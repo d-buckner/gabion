@@ -1,4 +1,7 @@
-//! `#[service]` — one trait, four surfaces.
+//! `#[service]` — one trait, every surface.
+//!
+//! Two of the four named surfaces are built today (`cli`, `server`/`openapi`);
+//! `mcp` and the typed client are planned (docs/GAPS.md §4).
 //!
 //! Annotates a service trait. **The trait is the boundary:** every method in it
 //! is generated into every surface, with no per-method opt-in or opt-out. An op
@@ -44,10 +47,13 @@ pub(crate) struct Method {
     pub(crate) description: String,
 }
 
-/// The route a method is served on. One place computes it, so the router and the
+/// The route a method is served on: `POST /api/todo.create`.
+///
+/// The spec's wire decision (spec §5) is one POST per method, dotted under
+/// `/api`, and this is the only place it is computed — so the router and the
 /// OpenAPI document cannot disagree about it.
 pub(crate) fn route(ns: &str, m: &Method) -> String {
-    format!("/{}/{}", ns, m.snake)
+    format!("/api/{ns}.{}", m.snake)
 }
 
 /// Everything the code generators need, precomputed from the trait.

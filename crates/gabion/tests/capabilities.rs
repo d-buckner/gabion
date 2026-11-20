@@ -69,7 +69,7 @@ async fn timeout_keeps_a_result_that_arrives_first() {
 async fn mock_http_replays_the_script_and_records_the_request() {
     let http = MockHttp::new().route(
         HttpMethod::Post,
-        "http://todo.internal/todo/create",
+        "http://todo.internal/api/todo.create",
         HttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
@@ -80,7 +80,7 @@ async fn mock_http_replays_the_script_and_records_the_request() {
     let reply = http
         .send(
             HttpRequest::post(
-                "http://todo.internal/todo/create",
+                "http://todo.internal/api/todo.create",
                 br#"{"title":"milk"}"#.to_vec(),
             )
             .with_header("content-type", "application/json"),

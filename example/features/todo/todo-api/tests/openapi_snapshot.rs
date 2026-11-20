@@ -53,7 +53,7 @@ fn the_committed_document_matches_the_generated_one() {
 #[test]
 fn every_op_is_in_the_document() {
     let doc = todo_api::__todo_server::todo_openapi();
-    for path in ["/todo/create", "/todo/complete", "/todo/list"] {
+    for path in ["/api/todo.create", "/api/todo.complete", "/api/todo.list"] {
         let op = &doc["paths"][path]["post"];
         assert!(op.is_object(), "{path} is missing from the document");
         assert_eq!(
@@ -73,12 +73,12 @@ fn every_op_is_in_the_document() {
 fn method_docs_reach_the_document() {
     let doc = todo_api::__todo_server::todo_openapi();
     assert_eq!(
-        doc["paths"]["/todo/create"]["post"]["summary"],
+        doc["paths"]["/api/todo.create"]["post"]["summary"],
         "Add one todo. Fails with `EmptyTitle` when the title is blank."
     );
     // `list` has a one-line doc: a summary, and no duplicated description.
     assert!(
-        doc["paths"]["/todo/list"]["post"]
+        doc["paths"]["/api/todo.list"]["post"]
             .get("description")
             .is_none(),
         "a one-line doc must not be written twice"

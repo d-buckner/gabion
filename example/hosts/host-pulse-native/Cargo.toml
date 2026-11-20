@@ -1,0 +1,26 @@
+[package]
+name = "host-pulse-native"
+version.workspace = true
+edition.workspace = true
+# v0.1 ships as a git/path dependency; not published to crates.io yet.
+publish = false
+license.workspace = true
+authors.workspace = true
+description = "pulse desktop host: both features and the renderer in a Dioxus window, state on disk. Composition only."
+
+[[bin]]
+name = "pulse-gui"
+path = "src/main.rs"
+
+[dependencies]
+gabion-native = { workspace = true }
+checks-api = { path = "../../features/checks/checks-api" }
+incidents-api = { path = "../../features/incidents/incidents-api" }
+checks-core = { path = "../../features/checks/checks-core" }
+incidents-core = { path = "../../features/incidents/incidents-core" }
+pulse-render = { path = "../../features/pulse/pulse-render" }
+dioxus = { workspace = true, features = ["desktop", "launch"] }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -72,12 +72,13 @@ fn current_dir() -> PathBuf {
 
 fn help() -> Summary {
     let text = "\
-gabion — one business core, four surfaces
+gabion — one business core, every surface
 
   gabion check [--fast] [--no-external] [--update-surfaces] [--root PATH] [--target TRIPLE]
 
   static rules (always):
     edge table        process wall, feature wall, upward leak, host purity
+    core deps         a *-core may not name a runtime, server, client or store
     clippy.toml       required effect bans and thresholds are still present
     surfaces          .gabion/surfaces.lock matches the reachable method set
     sources           comment rule, silent defaults, #[allow] placement,
@@ -86,7 +87,9 @@ gabion — one business core, four surfaces
   subprocess gates:
     fmt, clippy (-D warnings), test          (cargo)
     shear, deny                              (--no-external to skip)
-    wasm build of every *-core               (the wall proof)
+    wasm build of every *-core               (catches crates that cannot build
+                                              for wasm; effects are sealed by
+                                              clippy.toml and the core deps rule)
 
   --fast              static rules only, no subprocesses
   --update-surfaces   rewrite the surface lock (the 'I meant to publish that' gesture)

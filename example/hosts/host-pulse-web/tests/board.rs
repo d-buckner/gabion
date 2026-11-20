@@ -13,15 +13,16 @@ fn ok() -> HttpResponse {
     }
 }
 
-/// The api answers, the cdn is not scripted, so it never answers. One green row
-/// and one red row is the whole point: the red row's uptime and its open incident
-/// both came out of `incidents`, which only knows what `checks` published.
+/// The api answers, the offline port is not scripted, so it never answers. One
+/// green row and one red row is the whole point: the red row's uptime and its
+/// open incident both came out of `incidents`, which only knows what `checks`
+/// published.
 #[tokio::test]
 async fn one_watch_is_up_and_one_is_in_an_incident() {
-    let http = MockHttp::new().route(HttpMethod::Get, "http://api.internal/health", ok());
+    let http = MockHttp::new().route(HttpMethod::Get, "https://api.github.com/zen", ok());
     let rows = host_pulse_web::board(TestCaps::new().with_http(http)).await;
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0], ("api".to_string(), true, 100, false));
-    assert_eq!(rows[1], ("cdn".to_string(), false, 0, true));
+    assert_eq!(rows[1], ("offline".to_string(), false, 0, true));
 }

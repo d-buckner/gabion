@@ -271,7 +271,7 @@ impl MockHttp {
     }
 
     /// Script the reply for `METHOD url`, for example
-    /// `POST http://todo.internal/todo/create`.
+    /// `POST http://todo.internal/api/todo.create`.
     #[must_use]
     pub fn route(self, method: HttpMethod, url: &str, reply: HttpResponse) -> Self {
         self.routes

@@ -38,12 +38,18 @@ fn rules_found(root: &Path) -> BTreeSet<&'static str> {
 }
 
 fn member(name: &str, deps: &[&str]) -> String {
+    member_with(name, deps, "")
+}
+
+/// A member whose `[dependencies]` also carries non-workspace entries, which is
+/// how the `core-runtime-dep` fixture names a runtime.
+fn member_with(name: &str, deps: &[&str], external: &str) -> String {
     let deps: String = deps
         .iter()
         .map(|d| format!("{d} = {{ path = \"../{d}\" }}\n"))
         .collect();
     format!(
-        "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}\n[lints]\nworkspace = true\n"
+        "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}{external}\n[lints]\nworkspace = true\n"
     )
 }
 
@@ -153,7 +159,10 @@ fn every_rule_bites() {
             ),
             ("x-api/Cargo.toml", &member("x-api", &[])),
             ("x-api/src/lib.rs", X_API_GLOB),
-            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            (
+                "x-core/Cargo.toml",
+                &member_with("x-core", &["x-api"], "tokio = \"1\"\n"),
+            ),
             ("x-core/src/lib.rs", X_CORE_SRC),
             // render: the process wall, crossed
             (
@@ -194,12 +203,59 @@ impl x_api::XService for Q {
         "file-length",
         "clippy-config",
         "contract-glob",
+        "core-runtime-dep",
     ] {
         assert!(
             found.contains(rule),
             "rule `{rule}` did not fire; findings were {found:?}"
         );
     }
+}
+
+/// A runtime in a core is a manifest reading, not a build failure: tokio's `rt`
+/// feature compiles for wasm32-unknown-unknown, so this rule is the wall. A
+/// target-specific dependency is read too, since it is how a native-only branch
+/// would sneak past a plain `[dependencies]` scan.
+#[test]
+fn a_runtime_in_a_core_is_a_finding_but_a_host_may_have_one() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", X_API_SRC),
+            (
+                "x-core/Cargo.toml",
+                &format!(
+                    "{}[target.'cfg(unix)'.dependencies]\nreqwest = \"0.12\"\n",
+                    member_with("x-core", &["x-api"], "tokio = \"1\"\naxum = \"0.8\"\n")
+                ),
+            ),
+            ("x-core/src/lib.rs", "pub fn f() {}\n"),
+            (
+                "host-x/Cargo.toml",
+                &member_with("host-x", &["x-core"], "tokio = \"1\"\n"),
+            ),
+            ("host-x/src/lib.rs", "pub fn h() {}\n"),
+        ],
+    );
+
+    let mut opts = Options::new(tmp.path());
+    opts.fast = true;
+    let summary = check(&opts);
+    let hits: Vec<&str> = summary
+        .findings
+        .iter()
+        .filter(|f| f.rule == "core-runtime-dep")
+        .map(|f| f.location.as_str())
+        .collect();
+
+    assert_eq!(
+        hits,
+        vec!["x-core -> axum", "x-core -> reqwest", "x-core -> tokio"],
+        "only the core crate is audited for runtime crates"
+    );
 }
 
 /// A clippy.toml carrying exactly the bans and thresholds gabion requires.

@@ -40,14 +40,14 @@ async fn a_watch_added_over_http_comes_back_in_the_list() {
     let (status, added) = post(
         &caps,
         &base,
-        "/check/add",
+        "/api/check.add",
         json!({ "name": "api", "url": "http://api.internal/health" }),
     )
     .await;
     assert_eq!(status, 200);
     assert_eq!(added["name"], "api");
 
-    let (status, list) = post(&caps, &base, "/check/list", json!(null)).await;
+    let (status, list) = post(&caps, &base, "/api/check.list", json!(null)).await;
     assert_eq!(status, 200);
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["check"]["id"], added["id"]);
@@ -59,7 +59,7 @@ async fn a_watch_added_over_http_comes_back_in_the_list() {
 async fn an_unknown_watch_comes_back_as_404_in_the_error_envelope() {
     let (base, caps) = serve().await;
     // `CheckId` is a newtype, so its JSON is the bare id, not an object.
-    let (status, body) = post(&caps, &base, "/check/probe", json!("nope")).await;
+    let (status, body) = post(&caps, &base, "/api/check.probe", json!("nope")).await;
     assert_eq!(status, 404);
     assert_eq!(body["kind"], "not_found");
     assert!(body["message"].as_str().unwrap().contains("not found"));
@@ -71,7 +71,7 @@ async fn a_malformed_body_is_400_in_the_same_envelope() {
     let reply = caps
         .http()
         .send(HttpRequest::post(
-            format!("{base}/check/add"),
+            format!("{base}/api/check.add"),
             b"{not json".to_vec(),
         ))
         .await

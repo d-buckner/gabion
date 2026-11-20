@@ -1,5 +1,8 @@
 /target
 *.store.json
+pulse-state.json
+pulse-gui.json
+dist/
 
 # Cargo.lock is deliberately tracked (it used to be ignored): this workspace
 # produces binaries, and `cargo deny` audits the exact versions that ship.

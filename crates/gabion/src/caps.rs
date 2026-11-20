@@ -202,8 +202,9 @@ pub enum HttpError {
 }
 
 /// A core's way to another service. This is the capability the feature wall
-/// needs: feature A reaches feature B through B's generated client, and that
-/// client travels on `Http` rather than on an HTTP crate in the core.
+/// needs: feature A reaches feature B through B's `*-api` contract, and the
+/// generated HTTP client for that contract (still planned) travels on `Http`
+/// rather than on an HTTP crate in the core.
 #[async_trait]
 pub trait Http: Clone + Send + Sync + 'static {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError>;

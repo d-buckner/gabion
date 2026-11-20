@@ -128,7 +128,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/incident/evaluate": {
+    "/api/incident.evaluate": {
       "post": {
         "description": "the incidents this call changed.",
         "operationId": "incident_evaluate",
@@ -156,7 +156,7 @@
         ]
       }
     },
-    "/incident/list": {
+    "/api/incident.list": {
       "post": {
         "operationId": "incident_list",
         "responses": {
@@ -183,7 +183,7 @@
         ]
       }
     },
-    "/incident/uptime": {
+    "/api/incident.uptime": {
       "post": {
         "operationId": "incident_uptime",
         "requestBody": {

@@ -19,6 +19,7 @@ reqwest = { workspace = true }
 # test-util: the timer tests run on tokio's paused clock, so they check a
 # real timer without spending wall time.
 tokio = { workspace = true, features = ["time", "test-util"] }
+tempfile = "3"
 
 [lints]
 workspace = true
