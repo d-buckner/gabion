@@ -36,12 +36,17 @@ pub struct Uptime {
 }
 
 /// One error enum -> HTTP status, CLI exit code, through `ErrorKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum IncidentError {
     NotFound,
     /// A store, clock, or neighbor-contract failure: the request was fine, the
     /// world was not. Maps to 500 / exit 1 via `ErrorKind`, never hand-mapped.
     Internal,
+    /// A failure that crossed a wire and whose detail this version does not know.
+    Remote {
+        kind: ErrorKind,
+        message: String,
+    },
 }
 
 impl IncidentError {
@@ -49,6 +54,7 @@ impl IncidentError {
         match self {
             IncidentError::NotFound => ErrorKind::NotFound,
             IncidentError::Internal => ErrorKind::Internal,
+            IncidentError::Remote { kind, .. } => *kind,
         }
     }
 }
@@ -75,12 +81,23 @@ pub trait IncidentService {
     async fn uptime(&self, ctx: &Ctx, input: CheckId) -> Result<Uptime, IncidentErr>;
 }
 
+/// What a remote failure becomes in this app (see `gabion::error::FromWire`).
+impl FromWire for IncidentError {
+    fn from_wire(wire: WireError) -> Self {
+        IncidentError::Remote {
+            kind: wire.kind,
+            message: wire.message,
+        }
+    }
+}
+
 /// Constructor helper: builds the wire envelope from a domain error.
 pub fn incident_err(detail: IncidentError) -> IncidentErr {
     let kind = detail.kind();
     let msg = match &detail {
         IncidentError::NotFound => "incident not found".to_string(),
         IncidentError::Internal => "storage failed".to_string(),
+        IncidentError::Remote { message, .. } => message.clone(),
     };
     ServiceError::new(kind, msg, detail)
 }

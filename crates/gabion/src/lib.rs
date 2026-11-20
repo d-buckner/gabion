@@ -5,6 +5,7 @@
 
 pub mod caps;
 pub mod cli;
+pub mod client;
 pub mod conformance;
 pub mod ctx;
 pub mod error;

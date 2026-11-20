@@ -54,13 +54,18 @@ pub struct CheckReport {
 }
 
 /// One error enum -> HTTP status, CLI exit code, through `ErrorKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum CheckError {
     NotFound,
     InvalidUrl,
     /// A store or serialization failure: the request was fine, the world was
     /// not. Maps to 500 / exit 1 via `ErrorKind`, never hand-mapped.
     Internal,
+    /// A failure that crossed a wire and whose detail this version does not know.
+    Remote {
+        kind: ErrorKind,
+        message: String,
+    },
 }
 
 impl CheckError {
@@ -69,6 +74,7 @@ impl CheckError {
             CheckError::NotFound => ErrorKind::NotFound,
             CheckError::InvalidUrl => ErrorKind::InvalidInput,
             CheckError::Internal => ErrorKind::Internal,
+            CheckError::Remote { kind, .. } => *kind,
         }
     }
 }
@@ -100,6 +106,16 @@ pub trait CheckService {
     async fn history(&self, ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
 }
 
+/// What a remote failure becomes in this app (see `gabion::error::FromWire`).
+impl FromWire for CheckError {
+    fn from_wire(wire: WireError) -> Self {
+        CheckError::Remote {
+            kind: wire.kind,
+            message: wire.message,
+        }
+    }
+}
+
 /// Constructor helper: builds the wire envelope from a domain error.
 pub fn check_err(detail: CheckError) -> CheckErr {
     let kind = detail.kind();
@@ -107,6 +123,7 @@ pub fn check_err(detail: CheckError) -> CheckErr {
         CheckError::NotFound => "check not found".to_string(),
         CheckError::InvalidUrl => "url must be http or https".to_string(),
         CheckError::Internal => "storage failed".to_string(),
+        CheckError::Remote { message, .. } => message.clone(),
     };
     ServiceError::new(kind, msg, detail)
 }

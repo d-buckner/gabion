@@ -88,12 +88,11 @@ async fn the_generated_cli_carries_the_caller_into_the_impl() {
     assert_eq!(ctx.tenant(), Some("acme"));
 }
 
-/// The same headers the generated client stamps are the ones the generated
-/// route reads. Driven at the protocol level here so the test does not depend on
-/// the client that phase 2 adds; `host-pulse-server`'s conformance test drives
-/// the same path through the generated client.
+/// The client stamps the identity and the route reads it — the same `Ctx`
+/// conversion on both sides, so an identity set by the caller is the identity the
+/// impl sees. This is the whole generated pair, end to end, over a real socket.
 #[tokio::test]
-async fn the_generated_route_carries_the_caller_into_the_impl() {
+async fn the_generated_client_and_route_agree_on_the_caller() {
     let (svc, seen) = service();
     let app = todo_api::__todo_server::todo_router(svc);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -102,28 +101,21 @@ async fn the_generated_route_carries_the_caller_into_the_impl() {
         axum::serve(listener, app).await.unwrap();
     });
 
+    let client = todo_api::TodoClient::new(base, gabion_native::ReqwestHttp::new());
     let ctx = Ctx::anonymous()
         .with_principal("agent-7")
         .with_tenant("acme")
         .with_trace("trace-1");
-    let mut request = HttpRequest::post(
-        format!("{base}/api/todo.create"),
-        serde_json::to_vec(&serde_json::json!({"title": "milk"})).unwrap(),
-    )
-    .with_header("content-type", "application/json");
-    for (name, value) in ctx.wire_headers() {
-        request = request.with_header(name, value);
-    }
-    let reply = gabion_native::ReqwestHttp::new()
-        .send(request)
+    let created = client
+        .create(
+            &ctx,
+            CreateTodo {
+                title: "milk".into(),
+            },
+        )
         .await
         .unwrap();
-    assert_eq!(
-        reply.status,
-        200,
-        "{}",
-        String::from_utf8_lossy(&reply.body)
-    );
+    assert_eq!(created.title, "milk");
 
     let seen = seen.last();
     assert_eq!(
@@ -133,6 +125,27 @@ async fn the_generated_route_carries_the_caller_into_the_impl() {
     );
     assert_eq!(seen.tenant(), Some("acme"));
     assert_eq!(seen.trace(), Some("trace-1"));
+}
+
+/// The client is a `TodoService`, so a host can hand a renderer either the core
+/// or a remote impl and the screen cannot tell. Proven by calling through the
+/// trait object, which is exactly what `todo-render` holds.
+#[tokio::test]
+async fn the_client_can_stand_in_where_the_core_stood() {
+    let (svc, _seen) = service();
+    let app = todo_api::__todo_server::todo_router(svc);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let remote: Arc<dyn TodoService + Send + Sync> = Arc::new(todo_api::TodoClient::new(
+        base,
+        gabion_native::ReqwestHttp::new(),
+    ));
+    let listed = remote.list(&Ctx::anonymous(), ()).await.unwrap();
+    assert!(listed.is_empty(), "a fresh store lists nothing");
 }
 
 /// A call with no headers is anonymous rather than invented: a route that made

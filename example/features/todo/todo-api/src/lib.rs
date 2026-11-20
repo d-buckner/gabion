@@ -20,13 +20,20 @@ pub struct Todo {
 }
 
 /// One error enum -> HTTP status, MCP error code, CLI exit code.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum TodoError {
     NotFound,
     EmptyTitle,
     /// A store or serialization failure: the request was fine, the world was
     /// not. Maps to 500 / -32603 / exit 1 via ErrorKind, never hand-mapped.
     Internal,
+    /// A failure that crossed a wire and whose detail this version does not
+    /// know — an older or newer server, or a transport failure that never had a
+    /// detail at all. The kind and message always survive; the variant cannot.
+    Remote {
+        kind: ErrorKind,
+        message: String,
+    },
 }
 
 impl TodoError {
@@ -35,6 +42,7 @@ impl TodoError {
             TodoError::NotFound => ErrorKind::NotFound,
             TodoError::EmptyTitle => ErrorKind::InvalidInput,
             TodoError::Internal => ErrorKind::Internal,
+            TodoError::Remote { kind, .. } => *kind,
         }
     }
 }
@@ -62,6 +70,19 @@ pub trait TodoService {
     async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Todo>, TodoErr>;
 }
 
+/// What a remote failure becomes in this app. The client generates calls to
+/// `TodoErr::from_wire`, so the compiler demands this impl the moment a client is
+/// built: an app cannot ship a typed client that has no answer for a failure it
+/// does not recognise.
+impl FromWire for TodoError {
+    fn from_wire(wire: WireError) -> Self {
+        TodoError::Remote {
+            kind: wire.kind,
+            message: wire.message,
+        }
+    }
+}
+
 /// The middle rung of the ladder: reachable in-proc from another feature
 /// through `todo-api`, but no surface is generated for it, so no CLI flag, HTTP
 /// route, or agent tool can reach it. Purely-local internals skip this rung and
@@ -78,6 +99,7 @@ pub fn todo_err(detail: TodoError) -> TodoErr {
         TodoError::NotFound => "todo not found".to_string(),
         TodoError::EmptyTitle => "title must not be empty".to_string(),
         TodoError::Internal => "storage failed".to_string(),
+        TodoError::Remote { message, .. } => message.clone(),
     };
     ServiceError::new(kind, msg, detail)
 }

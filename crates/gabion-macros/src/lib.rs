@@ -27,8 +27,10 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 
 mod cli;
+mod client;
 mod server;
 use cli::gen_cli;
+use client::gen_client;
 use server::gen_server;
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
 
@@ -37,9 +39,12 @@ pub(crate) struct Method {
     pub(crate) ident: proc_macro2::Ident,
     pub(crate) snake: proc_macro2::Ident,
     pub(crate) input: Option<Type>, // None = unit input
-    /// The `Ok` type of the declared `Result`, or the whole return type when the
-    /// method does not return a `Result`.
+    /// The `Ok` type of the declared `Result`.
     pub(crate) output: Type,
+    /// The `Err` type of the declared `Result`. The generated client needs it: a
+    /// failure that crossed the wire has to come back as the app's own error
+    /// type, not as `serde_json::Value`.
+    pub(crate) error: Type,
     /// First line of the method's doc comment; empty when it has none.
     pub(crate) summary: String,
     /// The rest of the doc comment, empty when there is nothing beyond the first
@@ -60,6 +65,9 @@ pub(crate) fn route(ns: &str, m: &Method) -> String {
 pub(crate) struct Contract {
     /// Trait name minus the `Service` suffix, snake_cased: `todo`.
     pub(crate) ns: String,
+    /// Trait name minus the `Service` suffix, spelled as written: `Todo`. The
+    /// generated client is `TodoClient`.
+    pub(crate) base: String,
     pub(crate) trait_ident: proc_macro2::Ident,
     pub(crate) trait_name: String,
     pub(crate) methods: Vec<Method>,
@@ -114,6 +122,7 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let methods = collect_methods(&mut cleaned)?;
     let c = Contract {
         ns: to_snake(ns_src),
+        base: ns_src.to_string(),
         trait_ident,
         trait_name,
         methods,
@@ -121,10 +130,12 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
 
     let server = gen_server(&c);
     let cli = gen_cli(&c);
+    let client = gen_client(&c);
     Ok(quote! {
         #cleaned
         #server
         #cli
+        #client
     })
 }
 
@@ -176,12 +187,22 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             ));
         }
 
+        let Some((output, Some(error))) = result_args(&m.sig.output) else {
+            return Err(syn::Error::new_spanned(
+                &m.sig.output,
+                "every #[service] method returns `Result<T, E>`:\n\n    \
+                 async fn create(&self, ctx: &Ctx, input: T) -> Result<R, E>\n\n\
+                 An adapter that cannot express failure either invents a success or panics, \
+                 so a method that cannot fail uses `Result<T, Infallible>`.",
+            ));
+        };
         let (summary, description) = doc_summary(&m.attrs);
         methods.push(Method {
             ident: m.sig.ident.clone(),
             snake: format_ident!("{}", to_snake(&m.sig.ident.to_string())),
             input: input_ty,
-            output: ok_type(&m.sig.output),
+            output,
+            error,
             summary,
             description,
         });
@@ -199,18 +220,6 @@ fn is_ctx(ty: &Type) -> bool {
         return false;
     };
     p.path.segments.last().is_some_and(|seg| seg.ident == "Ctx")
-}
-
-/// Pull the `T` out of `Result<T, E>`; anything else is its own `T`.
-fn ok_type(output: &syn::ReturnType) -> Type {
-    result_args(output).map_or_else(|| whole_or_unit(output), |(ok, _)| ok)
-}
-
-fn whole_or_unit(output: &syn::ReturnType) -> Type {
-    match output {
-        syn::ReturnType::Type(_, ty) => (**ty).clone(),
-        syn::ReturnType::Default => syn::parse_quote!(()),
-    }
 }
 
 /// `Result<T, E>` -> `(T, Some(E))`; `Result<T>` -> `(T, None)`. Every other
