@@ -21,7 +21,7 @@ For codebases a lot of people — and agents — will write into.
 
 gabion is a cross-platform Rust app framework. You write one business core that
 runs natively, in the browser as WebAssembly, and on a server, and gabion generates
-every surface from it: HTTP, CLI, MCP, OpenAPI and a typed client.
+every surface from it: HTTP, CLI, MCP and a typed client.
 
 Every feature is split into `*-api`, `*-core` and `*-render` crates, and the crate
 graph enforces the boundaries instead of a linter: a render crate cannot import a
