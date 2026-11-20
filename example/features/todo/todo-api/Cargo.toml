@@ -47,6 +47,10 @@ name = "cli_surface"
 required-features = ["cli"]
 
 [[test]]
+name = "mcp"
+required-features = ["mcp"]
+
+[[test]]
 name = "openapi_snapshot"
 required-features = ["openapi"]
 

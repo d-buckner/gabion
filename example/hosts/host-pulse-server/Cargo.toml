@@ -13,9 +13,12 @@ name = "pulse-server"
 path = "src/main.rs"
 
 [dependencies]
-gabion-native = { workspace = true }
-checks-api = { path = "../../features/checks/checks-api", features = ["server", "openapi"] }
-incidents-api = { path = "../../features/incidents/incidents-api", features = ["server", "openapi"] }
+gabion = { workspace = true }
+# `server` for axum, `mcp` for the MCP endpoint: one capability bundle, one MCP
+# transport module, both from the framework.
+gabion-native = { workspace = true, features = ["server"] }
+checks-api = { path = "../../features/checks/checks-api", features = ["server", "openapi", "mcp"] }
+incidents-api = { path = "../../features/incidents/incidents-api", features = ["server", "openapi", "mcp"] }
 checks-core = { path = "../../features/checks/checks-core" }
 incidents-core = { path = "../../features/incidents/incidents-core" }
 axum = { workspace = true }

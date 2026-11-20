@@ -8,12 +8,19 @@ license.workspace = true
 authors.workspace = true
 description = "Native capability impls (SystemClock). Host-side only — never imported by *-core."
 
+[features]
+default = []
+# The MCP-over-HTTP transport needs a server, so it needs axum. A host that only
+# serves stdio does not pay for it.
+server = ["dep:axum"]
+
 [dependencies]
 gabion = { workspace = true }
 serde_json = { workspace = true }
 getrandom = "0.3"
 tokio = { workspace = true, features = ["time"] }
 reqwest = { workspace = true }
+axum = { workspace = true, optional = true }
 
 [dev-dependencies]
 # test-util: the timer tests run on tokio's paused clock, so they check a

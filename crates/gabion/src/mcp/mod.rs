@@ -15,22 +15,25 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
+use serde::Serialize;
 use serde_json::{json, Value};
+
+use crate::ctx::Ctx;
+use crate::error::{ErrorKind, ServiceError, WireError};
 
 /// What a tool call resolves to: the op's JSON value, or the flat wire error
 /// every other surface sends. Boxed because the trait is object-safe and this
 /// crate takes no `async_trait` dependency.
 pub type ToolResult<'a> = Pin<Box<dyn Future<Output = Result<Value, WireError>> + Send + 'a>>;
 
-use crate::ctx::Ctx;
-use crate::error::{ErrorKind, WireError};
-
 /// The protocol revision this server speaks. MCP versions are dates; a client
 /// that asks for a different one is told what it got rather than refused,
 /// because every field this server reads has been stable across them.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
+
+mod server;
+pub use server::Server;
 
 /// One tool, as `tools/list` publishes it. Built from the same method the HTTP
 /// route serves and the CLI dispatches, so the description a client reads is the
@@ -42,6 +45,93 @@ pub struct Tool {
     pub description: String,
     /// JSON Schema for `arguments`, from the type the route deserializes.
     pub input_schema: Value,
+}
+
+/// Input schemas for one service's tools, built once per `tools/list` call.
+///
+/// A separate type so the generated code does not have to know how schemars is
+/// configured, and so the generator's settings live in one place.
+///
+/// The one setting that matters: subschemas are inlined. An `inputSchema` is a
+/// self-contained document an agent hands to a model — a `$ref` into a
+/// `components/schemas` map that never travels with it is a schema nothing can
+/// resolve. (OpenAPI does the opposite, and is right to: there the definitions
+/// travel in the same document.)
+pub struct SchemaBuilder {
+    generator: schemars::generate::SchemaGenerator,
+}
+
+impl Default for SchemaBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SchemaBuilder {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            generator: schemars::generate::SchemaSettings::draft2020_12()
+                .with(|s| {
+                    s.meta_schema = None;
+                    s.inline_subschemas = true;
+                })
+                .into_generator(),
+        }
+    }
+
+    /// The schema for one input type. A schema that will not serialize says so
+    /// in the document rather than becoming `null`, which would tell a client
+    /// "any arguments are fine".
+    pub fn value<T: schemars::JsonSchema>(&mut self) -> Value {
+        let schema = self.generator.subschema_for::<T>();
+        match serde_json::to_value(schema) {
+            Ok(value) => value,
+            Err(e) => json!({
+                "type": "object",
+                "x-gabion-error": format!("schema did not serialize: {e}"),
+            }),
+        }
+    }
+}
+
+/// The schema for a tool that takes no arguments. `{}` would mean "any
+/// arguments"; this says what the tool expects, which is nothing.
+#[must_use]
+pub fn no_arguments() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
+}
+
+/// A successful tool result as JSON. A value that will not serialize is an
+/// `Internal` failure, never an empty success: the two are indistinguishable to
+/// a client otherwise.
+pub fn value_of<T: Serialize>(value: &T) -> Result<Value, WireError> {
+    serde_json::to_value(value).map_err(|e| {
+        WireError::new(
+            ErrorKind::Internal,
+            format!("result did not serialize: {e}"),
+        )
+    })
+}
+
+/// A failed call as the flat wire error every other surface sends, so the kind
+/// is the same one that becomes a 404 and exit 3.
+#[must_use]
+pub fn wire_of<E: Serialize>(error: &ServiceError<E>) -> WireError {
+    WireError::from_service(error)
+        .unwrap_or_else(|_| WireError::new(ErrorKind::Internal, "error detail failed to serialize"))
+}
+
+/// Parse a tool's `arguments` into the type the method declares. A caller that
+/// sends the wrong shape gets `InvalidInput` naming the tool, not a call with
+/// default values.
+pub fn arguments<T: serde::de::DeserializeOwned>(tool: &str, args: Value) -> Result<T, WireError> {
+    serde_json::from_value(args).map_err(|e| {
+        WireError::new(
+            ErrorKind::InvalidInput,
+            format!("bad arguments for {tool}: {e}"),
+        )
+    })
 }
 
 /// One service as MCP sees it.
@@ -62,152 +152,11 @@ pub trait Service: Send + Sync {
     fn call<'a>(&'a self, ctx: &'a Ctx, name: &'a str, args: Value) -> ToolResult<'a>;
 }
 
-/// Every mounted service, answering JSON-RPC requests.
-#[derive(Default)]
-pub struct Server {
-    services: Vec<Arc<dyn Service>>,
-}
-
-impl Server {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Mount one service. Mounting is explicit: a service that nothing mounted
-    /// is not reachable, which is what makes `gabion::registry` able to report
-    /// the ones nobody served.
-    #[must_use]
-    pub fn with(mut self, service: Arc<dyn Service>) -> Self {
-        self.services.push(service);
-        self
-    }
-
-    /// Every tool from every mounted service, sorted by name so the list is a
-    /// stable reviewable artifact rather than mount order.
-    #[must_use]
-    pub fn tools(&self) -> Vec<Tool> {
-        let mut out: Vec<Tool> = self.services.iter().flat_map(|s| s.tools()).collect();
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        out
-    }
-
-    /// Answer one request. `None` means "this was a notification": JSON-RPC has
-    /// no response for those, and answering one anyway is a protocol error a
-    /// client will report as a broken stream.
-    #[must_use]
-    pub async fn handle(&self, request: &str) -> Option<String> {
-        let envelope: Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return Some(error_response(Value::Null, -32700, &e.to_string(), None)),
-        };
-        let id = envelope.get("id").cloned();
-        let method = envelope.get("method").and_then(Value::as_str).unwrap_or("");
-        let params = envelope.get("params").cloned().unwrap_or(Value::Null);
-        if id.is_none() || id == Some(Value::Null) {
-            return None;
-        }
-        let id = id.unwrap_or(Value::Null);
-        match method {
-            "initialize" => Some(result(id, initialize())),
-            "tools/list" => Some(result(id, json!({ "tools": self.tools_json() }))),
-            "tools/call" => Some(self.call(id, &params).await),
-            "ping" => Some(result(id, json!({}))),
-            other => Some(error_response(
-                id,
-                -32601,
-                &format!("unknown method `{other}`"),
-                None,
-            )),
-        }
-    }
-
-    /// The `tools/list` payload, shared with the bearer of an HTTP endpoint that
-    /// wants to answer it without a full envelope.
-    #[must_use]
-    pub fn tools_json(&self) -> Vec<Value> {
-        self.tools()
-            .into_iter()
-            .map(|t| {
-                json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": t.input_schema,
-                })
-            })
-            .collect()
-    }
-
-    async fn call(&self, id: Value, params: &Value) -> String {
-        let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-        let args = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        let ctx = Ctx::from_meta(params.get("_meta").unwrap_or(&Value::Null));
-        let Some(service) = self
-            .services
-            .iter()
-            .find(|s| s.tools().iter().any(|t| t.name == name))
-        else {
-            return error_response(
-                id,
-                ErrorKind::NotFound.mcp_code(),
-                &format!("no tool named `{name}`"),
-                None,
-            );
-        };
-        match service.call(&ctx, name, args).await {
-            Ok(value) => result(
-                id,
-                json!({
-                    "content": [{ "type": "text", "text": render(&value) }],
-                    "isError": false,
-                }),
-            ),
-            Err(wire) => error_response(id, wire.kind.mcp_code(), &wire.message, Some(json!(wire))),
-        }
-    }
-}
-
-fn initialize() -> Value {
-    json!({
-        "protocolVersion": PROTOCOL_VERSION,
-        "capabilities": { "tools": { "listChanged": false } },
-        "serverInfo": {
-            "name": "gabion",
-            "version": env!("CARGO_PKG_VERSION"),
-        },
-    })
-}
-
-/// A tool result travels as text in v1. JSON is what every tool here returns,
-/// and a client that wants structure parses it back out of the one field the
-/// spec guarantees.
-fn render(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-fn result(id: Value, result: Value) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
-}
-
-/// A JSON-RPC error. `code` comes from `ErrorKind::mcp_code`, so a client that
-/// already understands the HTTP status understands this too.
-fn error_response(id: Value, code: i32, message: &str, data: Option<Value>) -> String {
-    let mut error = json!({ "code": code, "message": message });
-    if let (Some(data), Some(map)) = (data, error.as_object_mut()) {
-        map.insert("data".to_string(), data);
-    }
-    json!({ "jsonrpc": "2.0", "id": id, "error": error }).to_string()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // a failing assertion should show the payload
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     struct Stub;

@@ -21,6 +21,15 @@ use std::time::Duration;
 pub mod filestore;
 pub use filestore::FileStore;
 
+/// MCP over HTTP. Feature `server`, because it needs axum.
+#[cfg(feature = "server")]
+pub mod mcp_http;
+/// MCP over stdio. Framing only: the protocol lives in `gabion::mcp`, because
+/// `gabion` must stay wasm-safe and this needs a file descriptor.
+pub mod mcp_stdio;
+#[cfg(feature = "server")]
+pub use mcp_http::mcp_router;
+
 /// OS entropy — the native impl of `Random`.
 #[derive(Clone)]
 pub struct SystemRandom;

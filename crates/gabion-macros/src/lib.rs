@@ -28,9 +28,11 @@ use quote::{format_ident, quote};
 
 mod cli;
 mod client;
+mod mcp;
 mod server;
 use cli::gen_cli;
 use client::gen_client;
+use mcp::gen_mcp;
 use server::gen_server;
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
 
@@ -58,7 +60,14 @@ pub(crate) struct Method {
 /// `/api`, and this is the only place it is computed — so the router and the
 /// OpenAPI document cannot disagree about it.
 pub(crate) fn route(ns: &str, m: &Method) -> String {
-    format!("/api/{ns}.{}", m.snake)
+    format!("/api/{}", tool_name(ns, m))
+}
+
+/// The operation's name without a transport in it: `todo.create`. The route is
+/// this under `/api`, and the MCP tool is this exactly, so a client reading the
+/// OpenAPI document and an agent reading `tools/list` name the same operation.
+pub(crate) fn tool_name(ns: &str, m: &Method) -> String {
+    format!("{ns}.{}", m.snake)
 }
 
 /// Everything the code generators need, precomputed from the trait.
@@ -131,11 +140,13 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let server = gen_server(&c);
     let cli = gen_cli(&c);
     let client = gen_client(&c);
+    let mcp = gen_mcp(&c);
     Ok(quote! {
         #cleaned
         #server
         #cli
         #client
+        #mcp
     })
 }
 
