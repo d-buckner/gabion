@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Daniel Buckner"]
@@ -83,12 +83,12 @@ type_complexity = "deny"
 # path when it writes the published manifest, and a path-only dependency has no
 # requirement left to publish, so the uploaded crate cannot resolve. Locally the
 # path still wins, so workspace development is unchanged.
-# The requirement carries the full pre-release because semver excludes
-# pre-releases from a bare `0.1` requirement: gabion could not resolve
-# gabion-macros 0.1.0-alpha.1 otherwise. Tighten back to "0.1" when 0.1.0 ships.
-gabion = { path = "crates/gabion", version = "0.1.0-alpha.1" }
-gabion-macros = { path = "crates/gabion-macros", version = "0.1.0-alpha.1" }
-gabion-native = { path = "crates/gabion-native", version = "0.1.0-alpha.1" }
+# If a pre-release is ever published from these crates, the requirement has to
+# name the pre-release too: semver excludes pre-releases from a bare `0.1`
+# requirement, so gabion could not resolve gabion-macros 0.1.0-alpha.1.
+gabion = { path = "crates/gabion", version = "0.1" }
+gabion-macros = { path = "crates/gabion-macros", version = "0.1" }
+gabion-native = { path = "crates/gabion-native", version = "0.1" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
