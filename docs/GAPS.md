@@ -13,59 +13,64 @@ Ordered by how much damage the silence does.
 
 ## 1. Fail-open defaults (worst class: it passes and means nothing)
 
-Nothing open. Six items were here in total. The first two — the error kind
-dropped at the wire, and second-resolution ids silently overwriting records —
-closed earlier. A re-audit of the gate itself found four more, and each was
-confirmed by running the checker against a fixture before it was fixed:
+Nothing open. Eight items have been here in total and each was confirmed by
+running the checker against a fixture before it was fixed; the closed list is in
+§7.
 
-- the surface lock missed an op published as `#[gabion::service]`, because the
-  collector matched the bare spelling of the attribute only;
-- the surface lock missed every op in a `#[service]` trait declared outside
-  `*-api`, while the macro still generated a route and a subcommand for it;
-- the generated CLI printed nothing and exited 0 when a result would not
-  serialize;
-- a workspace with no members passed every rule without inspecting a crate.
-
-All four are closed with fixtures, and recorded in §7.
+The one this pass added is worth recording because it was *ours*, and it was
+introduced by the code that was meant to remove a gap: automatic registration was
+first built on `linkme` distributed slices, which are collected by the linker only
+when it happens to pull the object file that contains them. Measured on this
+toolchain, a real host binary that used both services and read the slice collected
+**nothing** — the registry came back empty and a host built on it would have served
+no routes while reporting a successful start. A registry that silently misses a
+contract is precisely the failure class this project exists to delete, so the
+linker is not involved at all now (§7).
 
 ## 2. Missing capabilities
 
-Nothing open. `crates/gabion/src/caps.rs` now defines `Clock`, `Store`, `Random`,
-`Sleep`, `Http`, the `timeout` combinator, and `Caps`. Both entries that were
-here are closed with tests and recorded in §7.
-
-What this does not deliver: the generated typed client still does not exist (§4),
-so no generated code travels on `Http` yet. The capability is proven against a
-real server and a real route, not against a client that is not built.
+Nothing open. `crates/gabion/src/caps.rs` defines `Clock`, `Store`, `Random`,
+`Sleep`, `Http`, the `timeout` combinator, and `Caps`. Every entry that was here is
+closed with tests and recorded in §7.
 
 ## 3. Claims ahead of code
 
 | Claim | Reality |
 |---|---|
-| "four surfaces" (README headline, spec §5) | CLI and HTTP exist. MCP and the typed client do not. README says so, and spec §5 marks each generated artifact as built or not built. |
-| auto-registration via `linkme` (spec §4) | Not built. Every host wires its routers and clap subcommands by hand; the spec now says so. |
-| "the wasm target fails on `std::fs` / `std::net` / `std::thread` / `tokio`" (README Layer 2, spec §3/§7) | False on the pinned toolchain: `std` ships wasm stubs (`std::fs`, `std::net`, `std::thread`, `std::time` all compile and link for `wasm32-unknown-unknown`), and tokio's `rt` feature builds there. The effect wall is the `clippy.toml` ban list plus the `core-runtime-dep` rule; the wasm step still catches crates that genuinely cannot build (tokio `net` via mio). |
-| cargo-mend-style visibility check (spec §7) | Not built. `pub` past the wall is unpoliced. |
-| axum importable only in generated modules + host mains (spec §7) | Not built. Nothing inspects `use axum` yet. |
-| Generated conformance suite across all four adapters (spec §8) | Not built. `TodoServiceImpl` is exercised through clap and axum by hand, never checked for agreement. |
-| `gabion dev` (spec §9) | Not built. |
+| "one trait, four surfaces" (README headline, spec §5) | All four exist: clap, axum, MCP over JSON-RPC, and a typed client that *is* the service trait implemented over `Http`. |
+| auto-registration via `linkme` (spec §4) | Built, but not with `linkme` (§7). `#[service]` emits `mount_on` on the trait object and a host names only the impl. The browser host uses it too, which the linker version could not. |
+| "the wasm target fails on `std::fs` / `std::net` / `std::thread` / `tokio`" | False on the pinned toolchain, as §7 records. The effect wall is the `clippy.toml` ban list plus `core-runtime-dep`. |
+| "MCP via rmcp" (spec §5) | Deliberately not a dependency (§7). The runtime speaks the three methods this framework uses (`initialize`, `tools/list`, `tools/call`) over JSON-RPC 2.0, and every path is tested in-repo. No SSE stream: a tool call answers once. |
+| `gabion dev` (spec §9) | Built as a watch/rebuild/restart loop over one host binary. It does not start a wasm bundler: that is `serve.sh` in an app that has one, and wiring it here is a host decision. |
+| Generated conformance suite across all four adapters (spec §8) | Built, with one honest hole: a *create* is not repeatable, so the cases are observations and failures (see §8). |
 | a `*-core` that names a runtime outside the banned list | `core-runtime-dep` reads an enumerated list (`tokio`, `axum`, `reqwest`, `sqlx`, …). A crate outside it gets through, and so does any effect outside `clippy.toml`'s enumerated paths. That is a wall with edges, not a proof. |
+| `over-broad-visibility` (spec §7) | Built in the only decidable direction: a `pub` item in a `*-core` that no other crate names is a finding and `--fix` narrows it. It cannot prove the remaining `pub` items are wanted, and it reads names, so a mention in a comment counts as a use. |
+| `axum` importable only in generated modules and host mains (spec §7) | Built as a source scan over every non-host app crate. It reads paths, not types: a crate that reaches axum through a re-export is not caught by it. |
 
 The earlier rows about `unsafe_code = "forbid"` workspace-wide, the glob re-export
-wall, and the OpenAPI envelope are closed and recorded in §7.
+wall, the OpenAPI envelope, and the error kind dropped at the wire are closed and
+recorded in §7.
 
 ## 4. Not built
 
-- **`gabion new`** — no scaffolding, so every app starts by copying the example
-  and hoping it copies the walls too. This is the gap that most limits the
-  framework being used by anyone else.
-- **MCP surface**, **generated typed client** (`InProcess` + `Http` impls).
-- **Automatic surface registration** (`linkme` distributed slice, spec §4) — hosts
-  wire routers and subcommands explicitly today.
-- **`gabion feature add`** — members are added to the workspace by hand.
-- **Per-call `Ctx`** (principal, tenant, trace-id, cancellation) — decided, not
-  implemented. Until it lands, no surface can carry a caller identity, so
-  authorization is unrepresentable.
+- **Renderer-agnostic UI kit.** The render crates print or use Dioxus directly;
+  there is no shared component kit, and the spec still lists that as an open
+  decision.
+- **`Ctx` propagation into capability impls.** The caller reaches every service
+  method, but a `Store` write does not know who is writing. Per-record attribution
+  is an app decision until something needs it.
+- **Streaming surfaces** (`Stream` return support) — v1 or v2 is still open in the
+  spec, and nothing in the code reserves the shape beyond the trait being
+  `async_trait`.
+- **`Ctx` cancellation across a process boundary.** HTTP drops the handler future
+  on disconnect, which cancels; there is no wire-level cancel message, so a client
+  that stops listening learns nothing and a server that is still probing cannot be
+  told to stop.
+- **`gabion feature remove`**, and any scaffolding for a second host: `gabion new`
+  writes two, `gabion feature add` writes crates.
+- **The publish story.** v0.1 is path-dependency only (`publish = false`), so
+  `gabion new` takes `--gabion-path` and every scaffolded app points at a
+  checkout. Nothing here is ready for crates.io.
 
 ## 5. Browser and desktop, shipped for one app
 
@@ -81,12 +86,12 @@ What the browser build comes with, and the doc says so rather than hiding it:
 `fetch` is CORS-bound, so a probe target that sends no
 `Access-Control-Allow-Origin` fails as a transport error; localStorage is
 per-origin; and the browser http capability drops response headers (v1 carries
-JSON bodies). The thin-client-over-HTTP posture (spec §10.3) is still not built:
-apps that want server-side probes have no generated client yet.
+JSON bodies). The thin-client posture (spec §10.3) is now available — a page can
+be handed `TodoClient` instead of the core, and `host-web` demonstrates both — but
+no example *ships* that way: `host-pulse-web` runs the cores locally on purpose.
 
-`example/hosts/host-web` (todo) remains what this section used to describe for
-both apps: a `TestCaps` wall proof with no bundler config and no way to run it in
-a browser.
+`example/hosts/host-web` (todo) remains a `TestCaps` wall proof with no bundler
+config and no way to run it in a browser.
 
 ## 6. Deliberate allowances (not gaps, but they look like gaps)
 
@@ -103,192 +108,145 @@ a browser.
   `rustls-tls-native-roots`, which reads the host's trust store and breaks the
   single-binary promise the http client exists to keep.
 - `[package.metadata.cargo-shear] ignored = ["serde", "axum", "bytes", "clap"]`
-  in `todo-api`: those are used only inside `#[service]`-generated code, which
+  in the api crates: those are used only inside `#[service]`-generated code, which
   cargo-shear cannot see. The tool's own escape hatch, not a deleted wall.
 - Branch-count cap lives in `gabion check` (limit 10), not clippy: clippy's
   `too_many_branches` threshold is hardcoded at 42 and has no config key.
+- `tests/` and `examples/` are scanned by a *subset* of the source rules — file
+  length, branch caps, TODOs, `#[allow]` placement — and not by the structural
+  ones (comment rule, silent defaults, contract purity). An integration test is an
+  effect home that ships nowhere, and applying the purity rules there was the
+  reason it went unscanned; the shape rules apply because a reviewer reads those
+  files too.
 
 ## 7. Closed (kept here so nobody reopens them)
 
-- **Errors could not cross the wire.** `ServiceError<E>` derived `Serialize`
-  only, with `kind_code` marked `#[serde(skip)]` — so the one field that maps
-  to HTTP status, MCP code and exit code was dropped at every boundary, and a
-  remote caller had a string to guess from. Now: `ErrorKind` serializes by
-  name, `WireError` is flat and bidirectional (`from_service` /
-  `into_service_error`), `ServiceError` has `Display` + `std::error::Error`, and
-  the generated HTTP surface emits `WireError` for *every* failure including a
-  body that will not parse. A client that knows the app's error enum recovers
-  the typed error; one that does not still gets kind and message. Proven by
-  `crates/gabion/src/error.rs` tests and by `POST /api/todo.complete` on a missing
-  id.
-  Deviation from the signed-off plan: the conversions are generic impls in the
-  runtime rather than code the macro generates per service — same effect, less
-  codegen, and nothing for an app to regenerate when the runtime changes.
-- **Two creates in the same second overwrote each other.** Ids were
-  `format!("t{}", now.0)` at whole-second resolution: the second `set()` replaced
-  the first, no error, discovered by a missing record. Fixed with a `Random`
-  capability (`Caps::random`) and a nonce in the id — `SystemRandom` (getrandom)
-  in the native effect home, deterministic `MockRandom` in tests, so id
-  behaviour is reproducible. Proven by `two_creates_in_the_same_second_do_not_collide`
-  and `ids_are_reproducible_under_test_caps`.
-- **`#[surface(...)]` was parsed and thrown away**, so `#[surface(cli)]` still
-  emitted an HTTP route, while the gate validated surface names the macro did
-  not honor. **Removed, not fixed.** There are no per-method surface
-  attributes: every method in a `#[service]` trait reaches every surface, and
-  an op that must not be remote lives outside the trait (plain trait in `*-api`
-  for cross-feature in-proc, inherent method for feature-local). Proven by
-  `crates/gabion-macros/src/tests.rs`.
-- **A missing attribute meant exposed.** With no attribute to forget there is
-  nothing to default on. `#[service(http)]` and any leftover `#[surface]` /
-  `#[internal]` are now hard compile errors rather than silent no-ops — an
-  author who believes they restricted a surface must be told they did not.
-- **The surface lock could be evaded by spelling.** The collector matched an
-  attribute path equal to `service`, so `#[gabion::service]` generated the full
-  set of surfaces while the op stayed out of `.gabion/surfaces.lock`. A locked
-  surface that depends on spelling is not a boundary. The collector now keys on
-  the last path segment. Proven by `surface_lock_sees_a_qualified_service_attribute`.
-- **A `#[service]` trait outside `*-api` was invisible.** The collector scanned
-  `*-api` crates only, but `#[service]` generates a route, a subcommand and a
-  client method wherever it appears. A trait in `*-core` published ops that no
-  review ever saw. The collector now scans every crate, and `service-outside-api`
-  names a trait declared in the wrong crate. Proven by
-  `service_trait_outside_the_contract_crate_is_a_finding`. The lock still records
-  names, not input types; that gap stays open in §8.
-- **The generated CLI called a failed call a success.** The clap dispatch mapped
-  a successful result with `to_string_pretty(..).unwrap_or_default()`, so a value
-  whose `Serialize` impl fails produced empty stdout and exit code 0 — the same
-  output as a call that succeeded with nothing to show. Rendering moved to
-  `gabion::cli::render_json`, which returns a `CliExit` with the `Internal` exit
-  code. Proven by `a_success_value_that_will_not_serialize_fails_the_call`, which
-  drives the generated dispatch, not the template string.
-- **An empty workspace passed.** `gabion check` ran its rules over the crate
-  graph from `cargo metadata`. With no members the graph is empty, every rule has
-  nothing to check, and the run prints PASS. An empty graph is now a named
-  failure. Proven by `a_workspace_with_no_members_is_a_failure`. The same run now
-  uses `cargo test --all-features`, so a feature-gated test target cannot be
-  skipped into a vacuous green.
-
-- **There was no way to express waiting.** Core code had no timer: `std::thread::sleep`
-  blocks a worker and does not exist on wasm, so retry or debounce logic had to be
-  faked in every test that touched it. `Caps::sleep` is a `Sleep` capability with
-  two methods: `sleep(millis)` to wait, and `timer(millis)` to bound a wait. A
-  deadline is a separate method because a timer that advances a virtual clock
-  would fire every timeout the moment it was polled. `gabion::caps::timeout` races
-  a future against that timer.
-  Native: `TokioSleep` over `tokio::time`. Tests: `MockSleep` over a `MockTime`
-  virtual clock shared with `MockClock`, which moves only when code asks to wait.
-  Proven by `a_wait_moves_the_virtual_clock_and_costs_no_wall_time`,
-  `timeout_cuts_off_a_wait_that_runs_past_the_deadline` and
-  `timeout_keeps_a_result_that_arrives_first` in `crates/gabion/tests/capabilities.rs`,
-  and by the same two timeout tests in `crates/gabion-native/tests/sleep.rs`, run
-  against the real tokio timer on its paused clock.
-  Deliberate limit: under the test clock a timeout only fires if the awaited code
-  sleeps past the deadline, because virtual time moves only on a wait. That is the
-  rule tokio's own virtual time follows, and it is documented at `timeout`.
-- **A core could not call another service.** The feature wall says cross-feature
-  calls go through the other feature's contract (and, once it is built, the
-  generated client), and there was no capability for that call to travel on. `Caps::http` is an `Http` trait over `HttpRequest`, `HttpResponse`
-  and `HttpError`: a method, a URL, headers, bytes. Native: `ReqwestHttp` with
-  rustls, so the single-binary promise holds and no system openssl is needed.
-  Tests: `MockHttp` replays scripted routes and records what was sent; a call
-  nobody scripted is an error rather than an empty 200. A non-2xx status is a
-  response, not a transport error, so the caller picks the `ErrorKind`.
-  Proven by `a_core_call_over_http_reaches_the_generated_route` and
-  `a_missing_route_comes_back_as_a_status_the_caller_can_read`, which call generic
-  `Caps` code over a real socket against the generated axum router, and by
-  `mock_http_replays_the_script_and_records_the_request`.
-  Deviation from the plan in §2's wording: `Timeout` is a combinator over `Sleep`,
-  not a sixth capability. A deadline needs the same clock as the wait it bounds,
-  and two capabilities that must agree on one clock is one capability with a
-  second method.
-
-- The two gate rules that used to police this (`surface-completeness`,
-  `surface-unknown`) were deleted, and replaced by `surface-snapshot`: the
-  reviewable artifact is the *set* of reachable ops
-  (`.gabion/surfaces.lock`), not an annotation on each one. Proven by
-  `surface_drift_is_a_finding` and `updating_the_lock_clears_the_finding`.
-
+- **A registry the linker could quietly empty.** Automatic registration was built
+  on `linkme` and measured empty in a real host binary — see §1. Replaced by an
+  inherent method the macro puts on the trait object (`impl dyn CheckService +
+  Send + Sync { fn mount_on(self: Arc<Self>, host: &mut Host) }`), which needs no
+  linker sections, works on wasm, and cannot be silently absent: the call is in
+  the host's source. Proven by `todo-api/tests/registry.rs`,
+  `host-pulse-server/tests/registry.rs` (mounted set, exposed ops, MCP tool list,
+  a contract mounted twice), and `host-pulse-web/tests/board.rs` (the browser build
+  reports the operations it holds).
+- **A contract nothing serves.** The registry cannot see an absent call, so
+  `unserved-contract` checks the other direction: a `#[service]` trait no host
+  crate names is a finding. Proven by `a_contract_no_host_serves_is_a_finding`, and
+  visible in `gabion feature add`'s own test, where a freshly added feature fails
+  the gate until a host mounts it.
+- **`pub` past the wall.** `over-broad-visibility` + `--fix`; see §3 for the limit.
+  Proven by `a_pub_nobody_names_is_over_broad_and_the_fix_applies`, which asserts
+  the item a host *does* name is left alone.
+- **A hand-written HTTP handler.** `axum-outside-host`; see §3 for the limit.
+  Proven by `axum_outside_a_host_is_a_finding` (a feature crate is a finding, a
+  host crate importing the same path is not, and the framework's own transport is
+  exempt because it *is* the machinery).
+- **A missing tool read as a failing one.** `cargo-shear`/`cargo-deny` absent used
+  to be reported as a failed step. `steps::run` now distinguishes "could not
+  start" from "ran and failed"; a missing tool is a failure by default and a
+  *named* `SKIP` under `--allow-missing-tools`, counted in the summary line.
+  Proven by `dev_once_runs_the_command_and_reports_its_status` (the process
+  boundary) and by the summary's own unit tests.
+- **`tests/` and `examples/` were unscanned.** Now scanned by the shape rules with
+  a whole-file test grant, so an `#[allow(clippy::disallowed_*)]` in an integration
+  test stays legal (it is an effect home) while a TODO or a 900-line file does not.
+  Proven by `tests_are_scanned_for_shape_but_granted_their_allows`.
+- **A workspace with no `*-core` passed the wasm step vacuously.** `no-wasm-proof`
+  is a finding now. Proven by `a_workspace_with_no_core_cannot_prove_the_wasm_wall`.
+- **The surface lock recorded names, not shapes.** Each line now carries a hash of
+  the operation's signature and the same-crate definitions it names
+  (`checks-api::CheckService::add #3f2a1b9c`), so a method that keeps its name and
+  changes its input or output type is a diff. Rendered from tokens rather than
+  `Debug`, because syn's `Debug` embeds byte offsets and made the hash change when
+  a file moved. Proven by `a_changed_input_type_is_a_finding` and the digest's own
+  unit tests. Limit: a type defined in *another* crate is hashed by name only.
+- **There was no way to scaffold an app.** `gabion new` writes a workspace whose
+  `clippy.toml`, `[workspace.lints]` and edge table are generated from the same
+  `Config::default()` the gate audits, and whose surface lock is written by the
+  gate's own collector. `gabion feature add` grows a feature and its members.
+  `gabion dev` watches sources and restarts the host. Proven by
+  `crates/gabion-cli/tests/new.rs`, which scaffolds into a temp directory and runs
+  the real gate over it — plus the refusal cases (occupied directory, a
+  `--gabion-path` that is not a checkout, a duplicate feature).
+- **No adapter agreement check.** `<ns>_conformance(svc, http, base, cases)` drives
+  one case through the impl, the generated clap tree, the generated MCP tool and
+  the generated client over a socket, and compares the four as JSON. The CLI now
+  carries the same flat `WireError` the route sends (`CliExit::wire`), which is
+  what made the comparison possible at all. Proven by
+  `host-server/tests/conformance.rs` and `host-pulse-server/tests/conformance.rs`,
+  including a failure case where all four must agree on the kind *and* the detail.
+  A case the suite cannot drive is a rejection, not a pass.
+- **No per-call context.** `gabion::ctx::Ctx` (principal, tenant, trace, a
+  cancellation flag with a waker list, no runtime dependency) is required as the
+  first parameter of every `#[service]` method, and each surface fills it in: HTTP
+  from headers, MCP from `_meta`, the CLI from `--principal`/`--tenant`/`--trace`,
+  the client by stamping the same headers the route reads. Proven by
+  `host-server/tests/identity.rs` (the generated clap tree and the generated
+  client→route pair both deliver the caller the caller named, and a call with no
+  headers stays anonymous) and `crates/gabion/tests/cancellation.rs`.
+- **No typed client.** `<Feature>Client<H: Http>` implements the *service trait*,
+  so a renderer cannot tell a remote impl from a local one. `FromWire` turns a wire
+  failure back into the app's error enum, and the compiler demands that impl the
+  moment a client is generated. Proven by `todo-api/tests/client.rs`,
+  `checks-api`/`incidents-api` client tests, and the conformance suite.
+- **No MCP surface.** `gabion::mcp` speaks JSON-RPC 2.0 over one `Server`, served
+  over stdio (`gabion-native`) and HTTP (`POST /mcp`). `ErrorKind::mcp_code` is
+  used, so a failure is the same kind as the route's 404 and the CLI's exit 3.
+  Tool schemas are inlined, because an `inputSchema` travels to a model without the
+  definitions map it might reference. Proven by `crates/gabion/src/mcp/*`,
+  `todo-api/tests/mcp.rs`, and `host-pulse-server/tests/mcp.rs` (both transports,
+  one server).
+- **Errors could not cross the wire.** `ServiceError<E>` derived `Serialize` only,
+  with `kind_code` marked `#[serde(skip)]`. Now: `ErrorKind` serializes by name,
+  `WireError` is flat and bidirectional, and the generated HTTP surface emits
+  `WireError` for *every* failure. Proven by `crates/gabion/src/error.rs` tests and
+  by `POST /api/todo.complete` on a missing id.
+- **Two creates in the same second overwrote each other.** Fixed with a `Random`
+  capability and a nonce in the id. Proven by
+  `two_creates_in_the_same_second_do_not_collide` and
+  `ids_are_reproducible_under_test_caps`.
+- **`#[surface(...)]` was parsed and thrown away.** Removed, not fixed: every
+  method in a `#[service]` trait reaches every surface, and an op that must not be
+  remote lives outside the trait. A leftover `#[surface]`/`#[internal]` is a hard
+  compile error. Proven by `crates/gabion-macros/src/tests.rs`.
+- **The surface lock could be evaded by spelling** (`#[gabion::service]`). The
+  collector keys on the last path segment. Proven by
+  `surface_lock_sees_a_qualified_service_attribute`.
+- **A `#[service]` trait outside `*-api` was invisible.** The collector scans every
+  crate, and `service-outside-api` names a trait in the wrong crate. Proven by
+  `service_trait_outside_the_contract_crate_is_a_finding`.
+- **The generated CLI called a failed call a success.** Rendering moved to
+  `gabion::cli::render_json`, which returns a `CliExit` with the `Internal` code.
+  Proven by `a_success_value_that_will_not_serialize_fails_the_call`.
+- **An empty workspace passed.** Now a named failure, and the run uses
+  `cargo test --all-features`. Proven by `a_workspace_with_no_members_is_a_failure`.
+- **There was no way to express waiting.** `Caps::sleep` and `gabion::caps::timeout`
+  over `TokioSleep` natively and `MockSleep` on a virtual clock in tests. Proven by
+  the timeout tests in `crates/gabion/tests/capabilities.rs` and
+  `crates/gabion-native/tests/sleep.rs`.
+- **A core could not call another service.** `Caps::http` over `ReqwestHttp`
+  (rustls) and `MockHttp`. Proven by
+  `a_core_call_over_http_reaches_the_generated_route`.
 - **The spec claimed a Cargo.toml wall that did not exist.** `unsafe_code =
-  "forbid"` workspace-wide was in spec §7, and there was no `[workspace.lints]`
-  section anywhere to set it. Now the workspace sets it, every member opts into
-  it, and the new `workspace-lints` rule audits the block the way `clippy-config`
-  audits clippy.toml: a missing section, a level lowered to `warn`, and a member
-  that never opts in are each named findings. Proven by
-  `a_workspace_with_no_lints_block_is_a_finding`, `a_loosened_workspace_lint_is_a_finding`,
-  and `a_member_that_skips_the_workspace_lints_is_a_finding`, and by an `unsafe`
-  block in `crates/gabion` failing `cargo clippy`. Cargo itself rejects a member
-  that opts into a block the workspace never declared, so the two ways to be
-  missing always travel together.
-- **A contract could re-export a whole module.** Spec §7 said clippy
-  `wildcard_imports` deny on contract would stop glob re-exports across the wall.
-  clippy does not lint `pub use` globs — measured on rust 1.99, `use
-  crate::inner::*` is a finding and `pub use inner::*` is silent. The re-export is
-  the case that matters, because the re-export is the one that publishes. The new
-  `contract-glob` rule reads the contract crates and names a `pub use` whose tree
-  contains a glob. Proven by `a_glob_reexport_in_a_contract_is_a_finding`, and the
-  glob sits in the `every_rule_bites` fixture so the rule cannot go quiet.
-- **The spec's wire decision did not match the wire.** Spec §5 said
-  `POST /api/todo.create` and a `Result<T, E>` envelope; the macro served
-  `POST /todo/create` and returned the bare value on 200 (`WireError` only on
-  failure). The code was wrong about the route and the spec was wrong about the
-  envelope. `route()` in `gabion-macros` now computes `/api/{feature}.{method}`
-  (one place, shared by the router and OpenAPI), the three committed documents
-  were regenerated, and the route tests were updated. The spec now states the
-  bare-value-on-200 shape that the generated handlers already produced.
-- **The effect wall was credited to the wrong gate.** README Layer 2 and spec
-  §3/§7 said `std::fs`, `std::net`, `std::thread`, and `tokio` fail to build for
-  wasm. They build: `std` ships wasm stubs for fs/net/thread/time, and tokio's
-  `rt` feature compiles for `wasm32-unknown-unknown` (both verified on the pinned
-  toolchain with a scratch crate). The ban is real, but it is `clippy.toml`'s
-  enumerated paths plus a new `core-runtime-dep` rule that reads every `*-core`
-  manifest for runtime/server/client/storage crates. Proven by
-  `a_runtime_in_a_core_is_a_finding_but_a_host_may_have_one` and by the core
-  fixture in `every_rule_bites`. The remaining edges are recorded in §3.
-- **An app could loosen the audit that audits it.** README says an app may tighten
-  the clippy thresholds through `max-thresholds`, and that the gate only ever
-  tightens them. `Config::apply` took the app's value outright, so
-  `max-thresholds = { cognitive-complexity-threshold = 999 }` in an app's own
-  Cargo.toml raised the limit `clippy-config` enforces: the delete-the-wall diff
-  taken in two steps. The gate keeps the tighter of the two now. Proven by
-  `an_app_cannot_loosen_a_required_threshold`.
-
-- **Nothing emitted a schema.** README promised an OpenAPI-ready envelope and no
-  code in the repo produced a schema. `#[service]` now generates
-  `<service>_openapi()` under the `server` and `openapi` features: one OpenAPI 3.1
-  document per service, built from the types the axum handlers already
-  deserialize, with the method's doc comment as the operation summary and
-  `WireError` as the one error response. The route string is computed once and
-  shared with the router, and the document is gated on the router feature, so it
-  cannot describe a route that is not served. The example commits its document to
-  `.gabion/openapi/todo.json`, and `todo-api/tests/openapi_snapshot.rs` fails when
-  the code and the committed document disagree, fails when an op has no path or a
-  `$ref` resolves to nothing, and fails if the trait's prose stops reaching the
-  document. Regenerate with
-  `GABION_BLESS_OPENAPI=1 cargo test -p todo-api --test openapi_snapshot`.
-  Deliberate limits: one schemars contract (deserialize) describes both directions,
-  so a DTO whose serialized shape differs from its deserialized shape needs its own
-  type; and the document is opt-in per api crate, because requiring `JsonSchema` on
-  every DTO is a demand an app may not want to take on.
-
-- **No example had two features.** Everything above claimed a feature wall and a
-  cross-feature call, and the repo had one feature, so nothing exercised either.
-  `example/features/pulse` is a second app: `checks` probes URLs, `incidents`
-  opens and closes outages from probe history, and `incidents-core`'s only window
-  on those probes is `checks-api`. `checks-core` is not a dependency of
-  `incidents-core` at all — `gabion check` reads dev-dependencies too, so a test
-  could not smuggle the implementation in — and the incidents tests drive a stub
-  that implements the contract and nothing else.
-  `example/hosts/host-pulse-server/tests/live_probe.rs` runs the same core
-  against a live socket, a route that returns 503, and a port nobody listens on.
-  Adding the two services made `surface-snapshot` fail until the eight new ops
-  were reviewed and committed to `.gabion/surfaces.lock`.
-  This is also the first code in the repo that waits: the probe ladder is three
-  tries with a doubling wait and a deadline, and
-  `checks-core/tests/probing.rs` asserts the backoff was 250ms then 500ms on the
-  virtual clock, so the wait is proven rather than assumed.
-  Two papercuts it exposed and fixed: `TestCaps` had no way to carry a scripted
-  `MockHttp` (now `with_http` and `http()`), and `CliExit` had no `Debug`, so a
-  test could not unwrap a generated CLI dispatch.
+  "forbid"` is now set once for the workspace and `workspace-lints` audits it,
+  including a member that never opts in.
+- **An app could loosen the audit that audits it.** `Config::apply` takes the
+  tighter of the two values. Proven by `an_app_cannot_loosen_a_required_threshold`.
+- **A contract could re-export a whole module.** `contract-glob` reads the contract
+  crates; clippy does not lint `pub use` globs. Proven by
+  `a_glob_reexport_in_a_contract_is_a_finding`.
+- **The spec's wire decision did not match the wire.** Route computed once in
+  `route()`, `/api/{feature}.{method}`, shared by the router and the OpenAPI
+  document, with the three committed documents regenerated.
+- **Nothing emitted a schema.** `#[service]` generates `<service>_openapi()` behind
+  `server` + `openapi`, and the example commits the document;
+  `openapi_snapshot.rs` fails when they disagree, when an op has no path, when a
+  `$ref` resolves to nothing, or when the trait's prose stops reaching the document.
+- **No example had two features.** `example/features/pulse` is a second app whose
+  `incidents-core` reaches `checks` only through `checks-api`, and
+  `host-pulse-server/tests/live_probe.rs` runs the same core against a live socket,
+  a 503, and a closed port.
 
 ## 8. Gate's own gaps
 
@@ -297,24 +255,27 @@ a browser.
   `fj actions tasks` reports no tasks — no runner is registered on the instance.
   GitHub Actions runs the same one command on every push and pull request, and
   that is what enforces the wall today.
-- `cargo shear` and `cargo deny` are assumed installed; CI installs them, a fresh
-  laptop does not have them. `gabion check` reports the step as failed rather
-  than "tool missing", which is misleading.
-- No `--fix` for mechanical findings.
-- Source rules scan `src/` only. `tests/` and `examples/` are unchecked by
-  design, which is why the framework's own integration tests carry effect-home
-  allows.
-- The wasm step builds every `*-core` crate, so an app with no `*-core` crate yet
-  gets a vacuous pass on the wall proof.
-- The surface lock is a set of names, not a schema: a method that keeps its name
-  and changes its input type drifts silently there. The OpenAPI snapshot covers
-  that shape for a service that builds the document, and only there — a service
-  that leaves the `openapi` feature off is back to names alone. Closing it in the
-  lock itself means hashing the input schema into the lock line.
+- **The conformance suite cannot compare a create.** Two calls to `check.add` are
+  two watches with two ids, so the cases are the ones a repeat answers the same
+  way: observations and failures. A create-shaped success is covered by the client
+  tests, which script the reply instead of repeating the call. Comparing creates
+  would need per-case state snapshots, which the capability model does not expose.
+- **`--fix` covers two rules.** `over-broad-visibility` and the surface lock. Every
+  other finding needs a decision (move this type, split this function) and is
+  advice, because a tool that rewrites architecture is a tool nobody can review.
+- **`unserved-contract` reads names.** It proves a host crate mentions the trait,
+  not that it mounts an impl. The runtime half is the host's own test, which mounts
+  and asserts on `exposed()`.
+- **The wasm step builds every `*-core`**, and `no-wasm-proof` now fails a
+  workspace that has none — but a workspace whose only core is a placeholder crate
+  still gets a vacuous pass, and nothing checks that a core is *used*.
 
 ## 9. Cheapest fixes available
 
-- The visibility check spec §7 claims (`pub` past the wall), which is the last
-  wall in that table with nothing behind it.
-- A `Dioxus.toml` and a `wasm-bindgen` driver for one wasm host, which would turn
-  §5 from a compile proof into a running page.
+- A `Dioxus.toml` and a `wasm-bindgen` driver for one wasm host, so the browser
+  story is a running page in the examples rather than in one app's `serve.sh`.
+- Extending the digest in the surface lock to definitions in *other* crates, which
+  means resolving `*-api` imports in the collector. The OpenAPI snapshot already
+  covers a service that builds the document; this would cover the rest.
+- Per-record attribution: threading `Ctx` into `Store` writes, so a store can say
+  who last touched a key.

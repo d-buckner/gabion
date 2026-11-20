@@ -15,8 +15,7 @@ Build single-binary Rust apps where the same business logic runs:
 
 with zero duplication of business logic. Every service operation is automatically
 available as a CLI subcommand, an HTTP endpoint, an MCP tool, and a typed client
-call — generated from one definition. (Today CLI and HTTP are built; MCP and the
-typed client are not — §5, GAPS §4.)
+call — generated from one definition. All four are built (§5).
 
 ## 2. Non-goals (v1)
 
@@ -104,15 +103,37 @@ talk through their public surface" rule, made physical, and
 `checks-api` and nothing from `checks-core`, and it reads probe history through
 the same `CheckService` trait an HTTP client walks through.
 
-### Registration (PLANNED: linkme auto-collection; BUILT: explicit wiring)
+### Registration (BUILT: `mount_on`, not `linkme`)
 
-Every host wires what it serves today: `check_router(checks)` merged into one
-axum app, `check_cli_command()` added as a clap subcommand. That is the shortest
-path in the examples and it is what they do. The planned version is a `linkme`
-distributed slice emitted by `#[service]`, so a host collects every service with
-zero manual registration; it is not built (GAPS §4), and a generic impl per
-`Caps` bundle makes it non-trivial. `gabion check` verifies the Cargo.toml edge
-table regardless, so a hand-added forbidden dep fails CI naming the wall rule.
+`#[service]` emits an inherent method on the trait object:
+
+```rust
+impl dyn CheckService + Send + Sync {
+    pub fn mount_on(self: Arc<Self>, host: &mut gabion::registry::Host) { /* … */ }
+}
+```
+
+so a host names the impl and nothing else — no namespace, no router function, no
+tool list:
+
+```rust
+let mut host = Host::new();
+checks.mount_on(&mut host);
+incidents.mount_on(&mut host);
+let app = gabion_native::host_router(&mut host);
+```
+
+`Host::mounted()` / `contracts()` / `exposed()` make what a running process serves
+an artifact a test can pin. The original plan here was a `linkme` distributed
+slice; it was built and measured **empty** in a real host binary (the linker is
+free to drop the object file holding an rlib static), which is the fail-open class
+GAPS §1 bans, so the linker is not involved. The method version also works on
+wasm, which the slice version could not (GAPS §7).
+
+What runtime registration cannot see is an *absent* call, so `gabion check` owns
+that direction: `unserved-contract` fails when a `#[service]` trait is named by no
+host crate. `gabion check` also verifies the Cargo.toml edge table, so a
+hand-added forbidden dep fails CI naming the wall rule.
 
 DTOs live in `*-api`, not `*-core`. If an agent puts a DTO in core, render gets
 an immediate compile error pointing at the wall — the error message is the
@@ -155,17 +176,17 @@ fails when it drifts, so "this method is now callable by an agent" appears as a
 diff in the PR rather than in production.
 
 `#[service]` generates, feature-gated so each host compiles only what it needs.
-Three of the six rows are still design rather than build. The status column is the
-claim checked against the repo (full list in docs/GAPS.md §3):
+All six rows are built; the notes record the shape each one took:
 
-| Feature    | Generated artifact                          | Status |
-|------------|---------------------------------------------|--------|
-| (default)  | wire types + `TodoServiceClient` trait + remote impl over `Http` | not built (GAPS §4) |
-| `inproc`   | `InProcess` client impl (direct call, zero serialization) | not built (GAPS §4) |
-| `server`   | axum routes                                 | built |
-| `server` + `openapi` | OpenAPI 3.1 document for exactly those routes | built |
-| `mcp`      | rmcp tool definitions                       | not built (GAPS §4) |
-| `cli`      | clap subcommand mapping                     | built |
+| Feature    | Generated artifact                          | Note |
+|------------|---------------------------------------------|------|
+| (default)  | `<Feature>Client<H: Http>`: the service trait implemented over `Http` | The in-process surface needs no generated code: the trait object *is* the in-process client, so a renderer takes `Arc<dyn TodoService>` and cannot tell which it was handed. |
+| `registry` (default) | `mount_on` on the trait object     | §4. Not `linkme`, and it works on wasm. |
+| `server`   | axum routes                                 | `POST /api/{feature}.{method}`. |
+| `server` + `openapi` | OpenAPI 3.1 document for exactly those routes | |
+| `mcp`      | one JSON-RPC tool per method                | `gabion::mcp`, not `rmcp`: the three methods this framework uses are the three it has to test, and the error mapping is the interesting part. Served over stdio and `POST /mcp`. No SSE in v1. |
+| `cli`      | clap subcommand mapping                     | Global `--principal` / `--tenant` / `--trace`. |
+| `conformance` | `<ns>_conformance(svc, http, base, cases)` | §8. |
 
 The document is gated on the router feature on purpose: a contract cannot
 describe a route that is not served. It is built from the same types the handlers
@@ -174,11 +195,12 @@ there is one source for the route, its shape, and its prose. The app commits the
 output and a test fails when the code and the committed document disagree.
 
 The renderer takes `Arc<dyn TodoService>` from its host and calls
-`client.create(input)`, so the signature, the types and the errors are the same
-on every target. That call is in-process everywhere today: the generated client
-that would turn it into a POST from a wasm renderer is not built (GAPS §4).
-This is the Dioxus `#[server]` dual-codegen pattern, generalized to four
-surfaces and enforced by the crate wall.
+`client.create(&ctx, input)`, so the signature, the types and the errors are the
+same on every target — and so is the caller, because `Ctx` is the first parameter
+of every method (decision 1). Whether the host injected the core or the generated
+`TodoClient` is invisible to the screen: `host-web` shows both postures off one
+trait object. This is the Dioxus `#[server]` dual-codegen pattern, generalized to
+four surfaces and enforced by the crate wall.
 
 Wire format: JSON, one POST per method (`POST /api/todo.create`; `route()` in
 `gabion-macros` is the single place the path is computed), args as the body, the
@@ -241,11 +263,13 @@ Each row: a shortcut an agent (or tired human) will take -> the mechanical block
 | forgetting to expose an op | the trait is the boundary: any method in a `#[service]` trait is on every surface, so there is nothing to forget |
 | publishing an op by accident | `surface-snapshot`: `.gabion/surfaces.lock` must match the reachable method set |
 | a `#[service]` trait declared outside `*-api` | `service-outside-api`: `#[service]` generates surfaces wherever it is written, so the lock scans every crate, and a trait in the wrong crate is named |
-| hand-written HTTP handler bypassing contract | `axum` importable only in generated modules + host main — NOT BUILT (GAPS §3) |
+| hand-written HTTP handler bypassing contract | `axum-outside-host`: any `axum` path in a non-host app crate is a finding. Reads paths, not types, so a re-export slips past it (GAPS §3). |
 | `unwrap()` / `expect()` | `clippy::unwrap_used`, `expect_used` deny, workspace-wide. `panic` and `implicit_clone` are not banned. |
 | unsafe anywhere outside effects | `unsafe_code = "forbid"` in `[workspace.lints.rust]`, audited by `workspace-lints` |
 | a member that skips the workspace wall | `workspace-lints`: every member must carry `[lints] workspace = true`, or the block is inert for it |
-| over-broad visibility (`pub` past the wall) | cargo-mend-style visibility check in CI [not built] |
+| over-broad visibility (`pub` past the wall) | `over-broad-visibility`: a `pub` item in a `*-core` that no other crate names is a finding, and `--fix` narrows it to `pub(crate)`. The decidable direction only (GAPS §3). |
+| a published contract no host mounts | `unserved-contract`: the registry cannot see an absent call, so the gate checks that a host crate names the trait. |
+| a workspace with no `*-core` | `no-wasm-proof`, so the wasm step cannot pass having built nothing. |
 | glob re-exports across the wall | `contract-glob`: a `pub use` whose tree contains a glob is a finding in any `*-api` crate. clippy's `wildcard_imports` is not the wall here: it does not lint `pub use` globs (measured on rust 1.99). |
 | code comments in service bodies (Dune's ban) | `no-comments-in-service-bodies` in `gabion check`: no comments inside `*-core` fn bodies; `///` docs on public items stay required (codegen needs them) |
 | silent default on a failed read/write | `core-silent-default`: `unwrap_or_default()` / `unwrap_or(..)` on a `Result` in `*-api` or `*-core` is a finding — a corrupt row must fail loudly, not vanish |
@@ -278,10 +302,13 @@ Two deliberate deviations from the original plan:
 ## 8. Verification story (verification > generation, per Tan)
 
 - Core is pure -> deterministic unit tests with `MockCaps` (fixed clock, in-memory store).
-- Generated conformance suite: the same `TodoServiceImpl` is driven through all
-  four adapters (clap invocation, axum test request, rmcp tool call, in-proc
-  client) and must agree on outputs. NOT BUILT — GAPS §3. Agents prove work by
-  execution, not review; the core's own tests are the execution that exists.
+- Generated conformance suite: `<ns>_conformance(svc, http, base, cases)` drives
+  one input through the impl, the generated clap tree, the generated MCP tool and
+  the generated client over a socket, and compares the four answers as JSON —
+  including the failure envelope, which is why the CLI now carries the same
+  `WireError` the route sends. A case the suite cannot drive is a rejection, not a
+  pass. It cannot compare a *create*: two calls are two creates, so the cases are
+  the ones a repeat answers the same way (GAPS §8).
 - `gabion check` = fmt + clippy + test + shear + deny + wasm-target build of
   core + the gabion-specific rules. One command, one exit code.
 - The gate is dogfooded: `crates/gabion-cli/tests/dogfood.rs` runs the real
@@ -294,14 +321,17 @@ Two deliberate deviations from the original plan:
 
 ```
 gabion/         # runtime: prelude, client traits, error model, capability traits
-gabion-macros/  # #[service] (#[GabionError] derive is not built yet)
+gabion-macros/  # #[service]: cli, server, openapi, mcp, client, registry, conformance
 gabion-native/  # native caps: SystemClock, FileStore (a declared effect home)
-gabion-cli/     # `gabion check` (built); `gabion new`, `gabion dev` (not yet)
-gabion-codegen/ # openapi export, contract snapshot (reviewable generated diff) [not built]
+gabion-cli/     # `gabion check`, `gabion new`, `gabion feature add`, `gabion dev`
+gabion-codegen/ # openapi export, contract snapshot (reviewable generated diff) [still one crate's
+                # job inside the macro; a separate crate is not built and is not needed yet]
 ```
 
-`gabion dev` runs server + wasm renderer + native CLI against one workspace with
-one command — the agent loop stays fast, which is half of Dune's thesis.
+`gabion dev` builds, runs, watches sources and restarts, so the agent loop stays
+fast — which is half of Dune's thesis. It runs one host binary; a wasm renderer is
+started by the app's own bundler script, because which one that is is a host
+decision.
 
 ## 10. Decisions
 
@@ -311,15 +341,18 @@ Signed off in the v0.1 audit:
    trace-id, cancellation) on every service fn, not a scoped service or a
    task-local. It is visible in the contract, trivially testable, and the
    generated adapters construct it. This deliberately breaks the "exactly one
-   input argument" shape — accepted. DECIDED, NOT BUILT (GAPS §4); until it
-   lands no surface can carry a caller identity.
+   input argument" shape — accepted. **Built**: `ctx: &Ctx` first on every
+   method, filled in by HTTP headers, MCP `_meta`, CLI flags and the client's own
+   headers; cancellation is a flag plus a waker list, so the runtime stays
+   wasm-safe.
 2. **Errors round-trip via a separate `WireError` plus `From`-style
    conversions.** Built. The in-proc error stays rich (thiserror-style typed
    detail); the wire type is flat and bidirectional, and `ErrorKind` is
    serialized instead of `#[serde(skip)]`. Conversions are generic runtime impls
    rather than per-service codegen.
 3. **wasm browser posture: thin client over HTTP, or local-first.** The render
-   crate may call the generated HTTP client so core does not run in the browser;
+   crate may be handed the generated `TodoClient` so core does not run in the
+   browser;
    `host-pulse-web` instead runs the same cores over `WebCaps` (localStorage +
    `fetch`), which keeps the board usable offline-first and needs no server.
    Which one an app takes is a host decision, not a framework one.
@@ -340,7 +373,9 @@ silence does):
 2. Wire format: JSON-only v1 vs CBOR option.
 3. Name (needs registry + SERP collision sweep before publishing).
 4. Streaming surfaces: `Stream` return support — v1 or v2?
-5. Whether `gabion check` should grow a `--fix` for the mechanical rules.
+5. ~~Whether `gabion check` should grow a `--fix`~~ — decided and built: it
+   applies the findings that carry an exact text edit (a narrowed `pub`, the
+   surface lock) once, and leaves the rest for a human.
 
 ## 11. Cheapest experiments first
 
@@ -349,7 +384,10 @@ silence does):
    billing-core, and the wasm build of a core fails on `std::time`.
 2. Spike `#[service]` v0: macro that generates just the axum router + clap from
    the trait (skip mcp/client first). Prove one fn -> two surfaces compiles.
-3. Add rmcp + Http client stub. Add `gabion check`. **Done:** `gabion check`
-   exists, is tested against negative fixtures, and runs in CI; the rmcp and
-   Http client stubs are not built.
-4. Only then: `gabion new` scaffolding + Dioxus template.
+3. Add rmcp + Http client stub. Add `gabion check`. **Done, with one deviation:**
+   `gabion check` exists, is tested against negative fixtures, and runs in CI; the
+   HTTP client and MCP surface are built, but on `gabion::mcp` rather than `rmcp`
+   (§5).
+4. Only then: `gabion new` scaffolding + Dioxus template. **`gabion new`,
+   `gabion feature add` and `gabion dev` are built**; the Dioxus template is not
+   (the scaffold's renderer prints, and a Dioxus screen is a host decision).

@@ -141,13 +141,18 @@ pub fn generate_lock(root: &Path) {
     opts.fast = true;
     opts.update_surfaces = true;
     let summary = check(&opts);
-    // `no-wasm-proof` is a fact about the fixture, not about the lock: these
-    // workspaces are one or two crates with no *-core. Everything else would mean
-    // the lock could not be written.
+    // `no-wasm-proof` and `unserved-contract` are facts about a one-crate fixture,
+    // not about the lock: it has no *-core to build for wasm and no host to mount
+    // it. Everything else would mean the lock could not be written.
     let failed: Vec<&str> = summary
         .findings
         .iter()
-        .filter(|f| !matches!(f.rule, "surface-snapshot" | "no-wasm-proof"))
+        .filter(|f| {
+            !matches!(
+                f.rule,
+                "surface-snapshot" | "no-wasm-proof" | "unserved-contract"
+            )
+        })
         .map(|f| f.rule)
         .collect();
     assert!(

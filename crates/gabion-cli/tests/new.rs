@@ -209,10 +209,16 @@ fn a_feature_can_be_added_to_an_existing_app() {
     );
     assert_ne!(after_lock, before);
 
+    // The gate now says the one thing a new feature has not done yet: publish a
+    // contract nobody serves. That is the rule working — an op that exists and
+    // cannot be reached is a half-published surface — so the test asserts the
+    // finding rather than a green run it would be wrong to promise.
     let after = check(&root);
-    assert!(
-        after.ok(),
-        "the grown app fails the gate:\n{}",
+    let rules: Vec<&str> = after.findings.iter().map(|f| f.rule).collect();
+    assert_eq!(
+        rules,
+        vec!["unserved-contract"],
+        "only `unserved-contract` should remain:\n{}",
         findings(&after)
     );
 

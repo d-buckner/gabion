@@ -194,11 +194,11 @@ pub trait XInternals {
                 "host-x/Cargo.toml",
                 &member("host-x", &["x-core", "x-render"]),
             ),
-            // The host names the core's one public item, which is what makes it not
-            // over-broad: `pub` in a core is the "a host may name this" boundary.
+            // The host names the core's public item (so it is not over-broad) and
+            // the service trait (so the contract is served).
             (
                 "host-x/src/lib.rs",
-                "fn main() { let _ = x_core::f(None); }\n",
+                "fn main() {\n    let _ = x_core::f(None);\n}\nfn mount(s: &dyn x_api::XService) {\n    let _ = s;\n}\n",
             ),
         ],
     );
@@ -214,10 +214,6 @@ pub trait XInternals {
     opts.fast = true;
     let summary = check(&opts);
     let rules: Vec<&str> = summary.findings.iter().map(|f| f.rule).collect();
-    eprintln!(
-        "LOCK: {:?}",
-        std::fs::read_to_string(tmp.path().join(".gabion/surfaces.lock"))
-    );
     assert!(summary.ok(), "clean fixture failed: {rules:?}");
 }
 

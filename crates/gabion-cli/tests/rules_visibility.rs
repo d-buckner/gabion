@@ -190,6 +190,38 @@ fn tests_are_scanned_for_shape_but_granted_their_allows() {
     );
 }
 
+/// A contract no host names is a surface nobody can reach. `gabion check` is the
+/// only thing that can see it: at runtime an absent mount is an absent call.
+#[test]
+fn a_contract_no_host_serves_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            (
+                "x-api/src/lib.rs",
+                "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n}\n",
+            ),
+            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
+            ("x-core/src/lib.rs", "pub fn f() {}\n"),
+            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
+            // The host never names `XService`: nothing mounts it.
+            ("host-x/src/lib.rs", "fn main() { let _ = x_core::f(); }\n"),
+        ],
+    );
+    let found = summary(tmp.path());
+    let hit = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "unserved-contract")
+        .expect("an unserved contract must be named");
+    assert!(hit.location.contains("XService"), "{}", hit.location);
+    assert!(hit.fix.contains("mount_on"), "{}", hit.fix);
+}
+
 /// A method that keeps its name and changes its input type used to pass the lock.
 /// The hash closes that: the line changes, so the diff shows it.
 #[test]

@@ -31,6 +31,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use quote::ToTokens;
+
+mod placement;
+use placement::unserved_findings;
 use syn::visit::Visit;
 use syn::{File, Item, ItemTrait, TraitItem};
 
@@ -243,11 +246,18 @@ fn write_lock(root: &Path, current: &BTreeSet<String>) -> Result<(), String> {
 pub fn check(graph: &Graph, root: &Path, update: bool) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut current = BTreeSet::new();
+    let mut contracts = BTreeSet::new();
     for krate in &graph.crates {
         let collected = collect_crate(krate);
         findings.extend(placement_findings(krate, &collected));
+        for op in &collected.ops {
+            let mut parts = op.split("::");
+            let (krate_name, trait_name) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            contracts.insert(format!("{krate_name}::{trait_name}"));
+        }
         current.extend(collected.ops);
     }
+    findings.extend(unserved_findings(graph, &contracts));
     if update {
         findings.extend(match write_lock(root, &current) {
             Ok(()) => Vec::new(),
