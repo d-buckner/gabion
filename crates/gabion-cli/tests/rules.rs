@@ -188,7 +188,7 @@ pub trait XInternals {
             ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
             (
                 "x-core/src/lib.rs",
-                "pub fn f(x: Option<u8>) -> u8 { x.unwrap_or(0) }\n",
+                "pub struct Core;\nimpl Core {\n    pub fn f(x: Option<u8>) -> u8 { x.unwrap_or(0) }\n}\n",
             ),
             ("x-render/Cargo.toml", &member("x-render", &["x-api"])),
             ("x-render/src/lib.rs", "pub fn r() {}\n"),
@@ -200,7 +200,7 @@ pub trait XInternals {
             // the service trait (so the contract is served).
             (
                 "host-x/src/lib.rs",
-                "fn main() {\n    let _ = x_core::f(None);\n    x_render::r();\n}\nfn mount(s: &dyn x_api::XService) {\n    let _ = s;\n}\n",
+                "fn main() {\n    let _ = x_core::Core::f(None);\n    x_render::r();\n}\nfn mount(s: &dyn x_api::XService) {\n    let _ = s;\n}\n",
             ),
         ],
     );

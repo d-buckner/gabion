@@ -288,3 +288,49 @@ fn suppression_fix(name: &str) -> &'static str {
         "broad allows are only legal inside generated modules (a mod named __* emitted by #[service])."
     }
 }
+
+// --- a core that stands behind nothing --------------------------------------
+
+/// A `*-core` crate with no `impl` block anywhere.
+///
+/// The wasm step builds every core, and the whole claim is that *that* build is
+/// the wall proof for the feature. A placeholder core — a struct and a `pub fn`
+/// nobody calls — compiles for wasm and proves nothing about business logic, while
+/// `gabion check` reports the wall as held. §8 called this a vacuous pass; it is
+/// the same class as a rule with no fixture.
+pub(crate) fn empty_core_rule(krate: &Crate) -> Vec<Finding> {
+    if krate.class != Class::Core || has_impl(krate) {
+        return Vec::new();
+    }
+    vec![Finding::new(
+        "empty-core",
+        krate.name.clone(),
+        format!(
+            "`{}` is a *-core crate with no impl block: it implements nothing",
+            krate.name
+        ),
+        "implement the feature's service trait here, or delete the crate. A placeholder core \
+         makes the wasm build green about a wall nothing is standing behind.",
+    )]
+}
+
+fn has_impl(krate: &Crate) -> bool {
+    struct Impls(usize);
+    impl<'ast> Visit<'ast> for Impls {
+        fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+            self.0 += 1;
+            visit::visit_item_impl(self, node);
+        }
+    }
+    krate.source_files().into_iter().any(|path| {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return false;
+        };
+        let Ok(file) = syn::parse_file(&text) else {
+            return false;
+        };
+        let mut found = Impls(0);
+        visit::visit_file(&mut found, &file);
+        found.0 > 0
+    })
+}

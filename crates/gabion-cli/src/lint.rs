@@ -21,7 +21,10 @@ mod handlers;
 pub mod rules;
 pub mod visibility;
 use branches::branch_rule;
-use rules::{allow_audit, comment_rule, contract_glob_rule, host_logic_rule, silent_default_rule};
+use rules::{
+    allow_audit, comment_rule, contract_glob_rule, empty_core_rule, host_logic_rule,
+    silent_default_rule,
+};
 
 #[must_use]
 pub fn check_crate(krate: &Crate, cfg: &Config) -> Vec<Finding> {
@@ -38,6 +41,7 @@ pub fn check_crate(krate: &Crate, cfg: &Config) -> Vec<Finding> {
         }
     }
     out.extend(handlers::check(krate));
+    out.extend(empty_core_rule(krate));
     out.extend(check_test_files(krate, cfg));
     out
 }
