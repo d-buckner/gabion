@@ -293,7 +293,7 @@ check`. It orchestrates `rustfmt`, `clippy` (workspace lints + `clippy.toml`),
 `cargo test`, `cargo shear`, `cargo deny`, and a wasm build of every `*-core`,
 then adds the rules above that need gabion's shape. The edge table is data in
 `[workspace.metadata.gabion.edges]`, not code, so an app can widen its own walls
-without patching the framework. CI template: `.forgejo/workflows/ci.yml`.
+without patching the framework. CI template: `.github/workflows/ci.yml`.
 The point stands: `gabion check` green == architecture correct, so an agent with
 zero context cannot pass CI while violating the wall.
 
