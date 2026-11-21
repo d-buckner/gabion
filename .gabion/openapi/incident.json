@@ -18,13 +18,27 @@
       },
       "ErrorKind": {
         "description": "Error kinds map 1:1 onto transport-level outcomes. Serialized by name, so\nthe kind survives a round trip instead of being dropped at the boundary.",
-        "enum": [
-          "not_found",
-          "invalid_input",
-          "conflict",
-          "internal"
-        ],
-        "type": "string"
+        "oneOf": [
+          {
+            "enum": [
+              "not_found",
+              "invalid_input",
+              "conflict",
+              "internal"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "forbidden",
+            "description": "The caller is known and not allowed. A stream frame that addresses another\nfeature's namespace lands here, never in `Internal`.",
+            "type": "string"
+          },
+          {
+            "const": "timeout",
+            "description": "A deadline arrived. A stream that cannot progress and hits its app-level\ndeadline lands here, never in `Internal`.",
+            "type": "string"
+          }
+        ]
       },
       "Incident": {
         "description": "One outage of one watch.",
