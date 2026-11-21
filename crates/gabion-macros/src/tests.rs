@@ -232,3 +232,41 @@ fn a_type_that_merely_contains_the_word_stream_is_fine() {
     );
     assert!(out.is_ok(), "a type named StreamConfig is not a stream");
 }
+
+/// A feature that streams moves its ordinary ops onto the socket once a stream is
+/// open (docs/streaming.md §5). The generated client is what does the moving, so
+/// the branch has to be in the code it writes — not in a runtime knob an app could
+/// forget to turn on.
+#[test]
+fn a_streaming_feature_routes_its_ordinary_ops_through_the_socket() {
+    let streamed = expand_src(
+        "pub trait S {
+        async fn ping(&self, ctx: &Ctx) -> Result<Frame, E>;
+        async fn watch(&self, ctx: &Ctx) -> Result<Each<Frame>, E>;
+    }",
+    );
+    let text = match streamed {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("a marked stream return must expand: {e}"),
+    };
+    assert!(
+        text.contains("has_open_stream"),
+        "an ordinary op of a streaming feature must check the connection first"
+    );
+
+    // A feature that never streams must not grow the check at all: its client is
+    // byte-identical to the one written before streams existed.
+    let plain = expand_src(
+        "pub trait S {
+        async fn ping(&self, ctx: &Ctx) -> Result<Frame, E>;
+    }",
+    );
+    let plain = match plain {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("a clean contract must expand: {e}"),
+    };
+    assert!(
+        !plain.contains("has_open_stream"),
+        "a feature with no listen op must keep the plain POST client"
+    );
+}

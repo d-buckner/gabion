@@ -9,7 +9,7 @@
 //! believed (§12): one socket, one `check` namespace, both directions.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use checks_api::CheckId;
+use checks_api::{CheckId, CheckService};
 use futures_util::StreamExt as _;
 use gabion::frames::Frame;
 use gabion::stream::EndReason;
@@ -163,4 +163,64 @@ fn probe_of(frame: gabion::frames::Frame) -> checks_api::Probe {
         Frame::Item { data, .. } => gabion::serde_json::from_value(data).unwrap(),
         other => panic!("expected an item frame, got {other:?}"),
     }
+}
+
+/// A streaming feature puts its ordinary ops on the connection — once the
+/// connection has a stream (§5).
+///
+/// Served with `ws_router` alone, so there is no HTTP route to fall back to. Before
+/// any stream the wall refuses the namespace and the op cannot be reached at all;
+/// after a `check.watch` is open the same call answers. That difference is only
+/// observable on the socket, so this is the proof that the generated client switched
+/// surfaces rather than quietly POSTing the whole time.
+#[tokio::test]
+async fn a_streaming_features_ordinary_ops_move_to_the_socket() {
+    let (checks, incidents) = host_pulse_server::services();
+    let host = host_pulse_server::host_from((checks.clone(), incidents));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = gabion_native::ws_router(host.ws());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let ctx = gabion::Ctx::anonymous().with_principal("on-socket");
+    let created = checks
+        .add(
+            &ctx,
+            checks_api::NewCheck {
+                name: "on-socket".to_string(),
+                url: "http://127.0.0.1:1/never".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let client = checks_api::CheckClient::with_streams(
+        &base,
+        gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
+    );
+
+    // Seed one observation so the stream's first frame is an item. A stream whose
+    // history is empty ends on its first frame, and then there is no open stream to
+    // carry anything.
+    checks
+        .probe(&ctx, CheckId(created.id.clone()))
+        .await
+        .unwrap();
+
+    // No stream yet, so no route and no socket call: the op is unreachable here.
+    let refused = client.probe(&ctx, CheckId(created.id.clone())).await;
+    assert!(
+        refused.is_err(),
+        "with nothing mounted over HTTP the op must not answer"
+    );
+
+    let _watch = client
+        .watch(&ctx, CheckId(created.id.clone()))
+        .await
+        .expect("the listen op opens on the socket");
+    let probed = client
+        .probe(&ctx, CheckId(created.id.clone()))
+        .await
+        .expect("with a stream open the same op travels on the socket");
+    assert_eq!(probed.check_id, created.id);
 }

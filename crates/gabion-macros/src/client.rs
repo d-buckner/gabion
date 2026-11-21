@@ -21,7 +21,8 @@ pub(crate) fn gen_client(c: &Contract) -> proc_macro2::TokenStream {
     let base = &c.base;
     let trait_ident = &c.trait_ident;
     let client_ident = format_ident!("{}Client", base);
-    let methods = c.methods.iter().map(|m| method(&c.ns, m));
+    let streams = c.streams();
+    let methods = c.methods.iter().map(|m| method(&c.ns, m, streams));
     let async_trait = crate::async_trait_attrs();
 
     // A feature that streams needs a socket as well as `Http`, so the client gains
@@ -129,12 +130,13 @@ pub(crate) fn gen_client(c: &Contract) -> proc_macro2::TokenStream {
     }
 }
 
-/// One method. An ordinary op is a POST with the caller's headers attached; a
-/// listen op opens a stream on the connection and decodes `item` frames.
-fn method(ns: &str, m: &Method) -> proc_macro2::TokenStream {
+/// One method. A listen op opens a stream on the connection and decodes `item`
+/// frames. An ordinary op is a POST, except in a feature that streams and has a
+/// stream open, where it is a `call` frame on that connection (§5).
+fn method(ns: &str, m: &Method, streams: bool) -> proc_macro2::TokenStream {
     match m.stream {
         Some(policy) => stream_method(ns, m, policy),
-        None => http_method(ns, m),
+        None => http_method(ns, m, streams),
     }
 }
 
@@ -197,11 +199,51 @@ fn input_encoding(m: &Method) -> (proc_macro2::TokenStream, proc_macro2::TokenSt
     }
 }
 
-fn http_method(ns: &str, m: &Method) -> proc_macro2::TokenStream {
+/// The `call`-frame branch of an ordinary op in a feature that streams.
+///
+/// §5: a feature that streams puts its ordinary ops on the connection too. Not
+/// always — the wall only lets a `call` into a namespace with a stream open, so
+/// before the first stream this op is still a POST.
+fn socket_branch(ns: &str, m: &Method) -> proc_macro2::TokenStream {
+    let op = tool_name(ns, m);
+    let error = &m.error;
+    let frame_input = match &m.input {
+        Some(_) => quote! {
+            match ::gabion::serde_json::to_value(&input) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(::gabion::client::transport::<#error>(
+                        format!("input did not serialize: {e}"),
+                    ))
+                }
+            }
+        },
+        None => quote! { ::gabion::serde_json::Value::Null },
+    };
+    quote! {
+        if self.conn.has_open_stream(#ns) {
+            let encoded = #frame_input;
+            return match self.conn.call(#op, encoded, ctx).await {
+                ::core::result::Result::Ok(value) => {
+                    ::gabion::serde_json::from_value(value).map_err(|e| {
+                        ::gabion::client::transport::<#error>(format!(
+                            "reply would not deserialize: {e}"
+                        ))
+                    })
+                }
+                ::core::result::Result::Err(wire) => {
+                    Err(<#error as ::gabion::error::FromWire>::from_wire(wire))
+                }
+            };
+        }
+    }
+}
+fn http_method(ns: &str, m: &Method, streams: bool) -> proc_macro2::TokenStream {
     let id = &m.ident;
     let path = route(ns, m);
     let output = &m.output;
     let error = &m.error;
+    let on_socket = streams.then(|| socket_branch(ns, m));
     let (param, encode) = match &m.input {
         Some(ty) => (
             quote! { input: #ty },
@@ -227,6 +269,7 @@ fn http_method(ns: &str, m: &Method) -> proc_macro2::TokenStream {
             ctx: &::gabion::ctx::Ctx,
             #param,
         ) -> ::core::result::Result<#output, #error> {
+            #on_socket
             #encode
             let mut request = ::gabion::caps::HttpRequest::post(
                 format!("{}{}", self.base, #path),
