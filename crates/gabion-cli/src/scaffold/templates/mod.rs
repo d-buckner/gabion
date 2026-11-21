@@ -225,7 +225,7 @@ impl<C: Caps> %SVC%ServiceImpl<C> {
     }
 }
 
-#[async_trait]
+#[service_impl]
 impl<C: Caps> %SVC%Service for %SVC%ServiceImpl<C> {
     async fn create(&self, _ctx: &Ctx, input: New%SVC%) -> Result<%SVC%, %SVC%Err> {
         if input.title.trim().is_empty() {

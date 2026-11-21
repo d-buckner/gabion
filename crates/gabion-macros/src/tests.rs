@@ -143,6 +143,53 @@ fn a_streaming_return_is_a_hard_error() {
     );
 }
 
+/// There is no default policy, because there is no unmarked stream shape. A
+/// `BoxStream` is dyn-compatible and spells nothing the token scan already knew,
+/// so without this it reaches the value generators and the author gets a
+/// schemars failure for a decision they never made.
+#[test]
+fn a_stream_marker_that_is_not_each_or_latest_is_a_hard_error() {
+    let msg = err_of(
+        "pub trait S {
+        async fn watch(&self, ctx: &Ctx) -> Result<BoxStream<'static, Frame>, E>;
+    }",
+    );
+    assert!(
+        msg.contains("streaming returns are not supported"),
+        "expected the streaming error, got: {msg}"
+    );
+    assert!(
+        msg.contains("Each<T>") && msg.contains("Latest<T>"),
+        "the refusal must name the two markers that do exist, got: {msg}"
+    );
+    assert!(
+        msg.contains("no unmarked stream shape"),
+        "the refusal must say there is no default policy, got: {msg}"
+    );
+}
+
+/// The markers are decided before the surfaces that carry them. Handing one to
+/// the value generators is the E0277-out-of-generated-code failure the refusal
+/// exists to prevent, so it stays a refusal until the WebSocket stage lifts it.
+#[test]
+fn the_stream_policy_markers_are_refused_as_reserved() {
+    for marker in ["Each", "Latest", "::gabion::stream::Latest"] {
+        let msg = err_of(&format!(
+            "pub trait S {{
+            async fn watch(&self, ctx: &Ctx) -> Result<{marker}<Frame>, E>;
+        }}"
+        ));
+        assert!(
+            msg.contains("reserved for streaming") && msg.contains("not built yet"),
+            "`{marker}` must be refused as reserved-but-unbuilt, got: {msg}"
+        );
+        assert!(
+            msg.contains("docs/streaming.md"),
+            "the refusal must point at the decision, got: {msg}"
+        );
+    }
+}
+
 #[test]
 fn a_type_that_merely_contains_the_word_stream_is_fine() {
     let out = expand_src(

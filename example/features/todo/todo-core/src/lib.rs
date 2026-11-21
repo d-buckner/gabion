@@ -34,7 +34,7 @@ fn internal() -> TodoErr {
     todo_err(TodoError::Internal)
 }
 
-#[async_trait]
+#[service_impl]
 impl<C: Caps> TodoService for TodoServiceImpl<C> {
     async fn create(&self, ctx: &Ctx, input: CreateTodo) -> Result<Todo, TodoErr> {
         if input.title.trim().is_empty() {

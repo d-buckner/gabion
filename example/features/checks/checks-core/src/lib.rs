@@ -202,7 +202,7 @@ impl<C: Caps> CheckServiceImpl<C> {
     }
 }
 
-#[async_trait]
+#[service_impl]
 impl<C: Caps> CheckService for CheckServiceImpl<C> {
     async fn add(&self, _ctx: &Ctx, input: NewCheck) -> Result<Check, CheckErr> {
         let scheme_ok = input.url.starts_with("http://") || input.url.starts_with("https://");

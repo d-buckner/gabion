@@ -39,7 +39,7 @@ pub trait ProbeService {
 
 pub struct Probe;
 
-#[async_trait]
+#[service_impl]
 impl ProbeService for Probe {
     async fn read(&self, _ctx: &Ctx, _input: ()) -> Result<Broken, ServiceError<ProbeError>> {
         Ok(Broken)

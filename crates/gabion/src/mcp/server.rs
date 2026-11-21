@@ -242,7 +242,8 @@ fn error_response(id: Value, code: i32, message: &str, data: Option<Value>) -> S
     }
     json!({ "jsonrpc": "2.0", "id": id, "error": error }).to_string()
 }
-#[cfg(test)]
+// tokio does not build for wasm32, and these tests need a real executor.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the payload
 mod cancel_tests {
     use std::sync::Arc;

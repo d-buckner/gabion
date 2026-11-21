@@ -5,6 +5,8 @@
 //! actually woken, and that the future completes every time it is polled after
 //! the flag is up. A cancellation handle that hangs the second time is worse than
 //! none, because it turns a cancelled call into a stuck one.
+//! Needs a real executor, so it is not built for wasm32.
+#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::time::Duration;

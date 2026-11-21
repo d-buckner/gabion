@@ -110,3 +110,6 @@ console_error_panic_hook = "0.1"
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
+# The stream trait gabion names in a signature. No runtime, no unsafe in its own
+# API, and it builds for wasm32-unknown-unknown.
+futures-core = "0.3"

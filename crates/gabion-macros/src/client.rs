@@ -22,6 +22,7 @@ pub(crate) fn gen_client(c: &Contract) -> proc_macro2::TokenStream {
     let trait_ident = &c.trait_ident;
     let client_ident = format_ident!("{}Client", base);
     let methods = c.methods.iter().map(|m| method(&c.ns, m));
+    let async_trait = crate::async_trait_attrs();
 
     quote! {
         /// The service trait, implemented over `Http`: the same methods, the same
@@ -55,7 +56,7 @@ pub(crate) fn gen_client(c: &Contract) -> proc_macro2::TokenStream {
         }
 
         #[cfg(feature = "client")]
-        #[::gabion::async_trait]
+        #(#async_trait)*
         impl<H: ::gabion::caps::Http> #trait_ident for #client_ident<H> {
             #(#methods)*
         }

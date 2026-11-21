@@ -6,11 +6,11 @@
 use std::sync::Arc;
 
 use checks_api::{Check, CheckErr, CheckId, CheckService, NewCheck, Probe};
-use gabion::prelude::{async_trait, Ctx};
+use gabion::prelude::{service_impl, Ctx};
 
 struct Stub;
 
-#[async_trait]
+#[service_impl]
 impl CheckService for Stub {
     async fn add(&self, _ctx: &Ctx, input: NewCheck) -> Result<Check, CheckErr> {
         Ok(Check {

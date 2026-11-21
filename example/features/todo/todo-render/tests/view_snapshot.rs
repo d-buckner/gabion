@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use gabion::prelude::{async_trait, Ctx};
+use gabion::prelude::{service_impl, Ctx};
 use todo_api::{Todo, TodoErr, TodoId, TodoService};
 
 /// A fixed list: the snapshot is about what the renderer does with data, not about
@@ -23,7 +23,7 @@ use todo_api::{Todo, TodoErr, TodoId, TodoService};
 /// process wall), so the contract is implemented here and nothing else.
 struct Fixture(Vec<Todo>);
 
-#[async_trait]
+#[service_impl]
 impl TodoService for Fixture {
     async fn create(&self, _ctx: &Ctx, _input: todo_api::CreateTodo) -> Result<Todo, TodoErr> {
         unreachable!("the snapshot only renders a list")
