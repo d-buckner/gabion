@@ -41,6 +41,11 @@ struct Inner {
     waiting: HashMap<StreamId, Waker>,
     /// The failure that ended the read side, once there was one.
     dead: Option<WireError>,
+    /// Which namespace each live stream belongs to, and how many are live in each.
+    /// The server's wall lets a `call` through only in a namespace with a stream
+    /// open, so the client has to know the same thing to choose a surface (§5).
+    live: HashMap<StreamId, String>,
+    per_ns: HashMap<String, usize>,
     next_id: u64,
 }
 
@@ -66,6 +71,8 @@ impl<S: Streams> Connection<S> {
                 queues: HashMap::new(),
                 waiting: HashMap::new(),
                 dead: None,
+                live: HashMap::new(),
+                per_ns: HashMap::new(),
                 next_id: 1,
             })),
         }
@@ -178,15 +185,37 @@ impl<S: Streams> Connection<S> {
     /// Start a stream and hand back the frames that belong to it.
     pub async fn open(&self, op: &str, input: Value, ctx: &Ctx) -> Result<Receiver, WireError> {
         let id = self.reserve();
+        let ns = Frame::op_namespace(op)
+            .ok_or_else(|| {
+                WireError::new(ErrorKind::InvalidInput, format!("`{op}` is not namespaced"))
+            })?
+            .to_string();
         let channel = self.ensure()?;
         channel
             .send(Frame::open(id, op, input, ctx))
             .await
             .map_err(|e| e.to_wire())?;
+        {
+            let mut inner = lock(&self.inner);
+            inner.live.insert(id, ns.clone());
+            *inner.per_ns.entry(ns).or_insert(0) += 1;
+        }
         Ok(Receiver {
             inner: Arc::clone(&self.inner),
             id,
         })
+    }
+
+    /// Whether a stream in namespace `ns` is live on this connection.
+    ///
+    /// This is what decides a streaming feature's surface for an ordinary op. The
+    /// server's wall lets a `call` frame through only in a namespace the client
+    /// already opened a stream in, so before the first stream the op must still be a
+    /// POST, and after one it must not be — §5's "a feature that streams puts all of
+    /// its ops on the connection" is conditional on the connection having one.
+    #[must_use]
+    pub fn has_open_stream(&self, ns: &str) -> bool {
+        lock(&self.inner).per_ns.get(ns).copied().unwrap_or(0) > 0
     }
 
     /// Stop a stream this connection opened, and report how it ended.
@@ -324,6 +353,13 @@ fn route(inner: &mut Inner, cx: &mut PollContext<'_>) -> Read {
         Poll::Ready(Some(Err(e))) => Read::Dead(e.to_string()),
         Poll::Ready(Some(Ok(frame))) => {
             let target = frame.id();
+            if matches!(frame, Frame::End { .. } | Frame::Error { .. }) {
+                if let Some(ns) = inner.live.remove(&target) {
+                    if let Some(count) = inner.per_ns.get_mut(&ns) {
+                        *count = count.saturating_sub(1);
+                    }
+                }
+            }
             inner.queues.entry(target).or_default().push_back(frame);
             if let Some(waker) = inner.waiting.remove(&target) {
                 waker.wake();

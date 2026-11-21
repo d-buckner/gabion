@@ -68,7 +68,10 @@ recorded in §7.
   streaming return with no marker is a compile error with a reason, and so is a
   marker with no item type. One host serves one `GET /api/ws`, and the namespace
   wall is enforced at both ends. The edges the design accepts and the code does not
-  hide: `POST /mcp` refuses a listen op by name, because one JSON answer cannot
+  hide: a streaming feature's ordinary ops move to the socket only once a stream in
+  that namespace is open, because the wall admits a `call` only into a namespace with
+  a live stream — before the first stream such an op is still a POST;
+  `POST /mcp` refuses a listen op by name, because one JSON answer cannot
   carry N items and v1 has no SSE (§9); a slow `Each` subscriber backpressures the
   whole connection, because there is one write queue per connection (§5); and the
   client has no reader task of its own, so a frame is moved when someone polls —
