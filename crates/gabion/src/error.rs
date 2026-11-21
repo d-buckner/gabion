@@ -20,6 +20,12 @@ pub enum ErrorKind {
     NotFound,
     InvalidInput,
     Conflict,
+    /// The caller is known and not allowed. A stream frame that addresses another
+    /// feature's namespace lands here, never in `Internal`.
+    Forbidden,
+    /// A deadline arrived. A stream that cannot progress and hits its app-level
+    /// deadline lands here, never in `Internal`.
+    Timeout,
     Internal,
 }
 
@@ -30,6 +36,8 @@ impl ErrorKind {
             ErrorKind::NotFound => "not_found",
             ErrorKind::InvalidInput => "invalid_input",
             ErrorKind::Conflict => "conflict",
+            ErrorKind::Forbidden => "forbidden",
+            ErrorKind::Timeout => "timeout",
             ErrorKind::Internal => "internal",
         }
     }
@@ -39,16 +47,24 @@ impl ErrorKind {
             ErrorKind::NotFound => 404,
             ErrorKind::InvalidInput => 400,
             ErrorKind::Conflict => 409,
+            ErrorKind::Forbidden => 403,
+            ErrorKind::Timeout => 408,
             ErrorKind::Internal => 500,
         }
     }
     /// JSON-RPC-style code used for MCP errors.
+    ///
+    /// `-32001` and `-32002` are gabion's own server-defined range; `-32602` and
+    /// `-32603` are the JSON-RPC standard codes for invalid params and internal
+    /// error, and gabion uses those rather than inventing its own.
     #[must_use]
     pub fn mcp_code(self) -> i32 {
         match self {
             ErrorKind::NotFound => -32001,
             ErrorKind::InvalidInput => -32602,
             ErrorKind::Conflict => -32002,
+            ErrorKind::Forbidden => -32003,
+            ErrorKind::Timeout => -32004,
             ErrorKind::Internal => -32603,
         }
     }
@@ -58,6 +74,8 @@ impl ErrorKind {
             ErrorKind::NotFound => 3,
             ErrorKind::InvalidInput => 2,
             ErrorKind::Conflict => 4,
+            ErrorKind::Forbidden => 5,
+            ErrorKind::Timeout => 6,
             ErrorKind::Internal => 1,
         }
     }
@@ -72,6 +90,8 @@ impl ErrorKind {
             2 => Some(ErrorKind::InvalidInput),
             3 => Some(ErrorKind::NotFound),
             4 => Some(ErrorKind::Conflict),
+            5 => Some(ErrorKind::Forbidden),
+            6 => Some(ErrorKind::Timeout),
             _ => None,
         }
     }
@@ -223,6 +243,17 @@ mod tests {
         ServiceError::new(ErrorKind::NotFound, "todo not found", DemoError::NotFound)
     }
 
+    /// Every kind the framework can name. A new variant that is not in here has
+    /// not been given a status, a code and an exit code.
+    const ALL_KINDS: [ErrorKind; 6] = [
+        ErrorKind::NotFound,
+        ErrorKind::InvalidInput,
+        ErrorKind::Conflict,
+        ErrorKind::Forbidden,
+        ErrorKind::Timeout,
+        ErrorKind::Internal,
+    ];
+
     #[test]
     fn kind_survives_the_wire() {
         let json = serde_json::to_string(&WireError::from_service(&demo()).expect("wire"))
@@ -273,16 +304,55 @@ mod tests {
         assert_eq!(ErrorKind::Internal.exit_code(), 1);
     }
 
+    /// A refusal and a stall each name themselves on all three surfaces, so a
+    /// client never reads either as `Internal` (`docs/streaming.md` §7.3).
+    #[test]
+    fn a_refusal_and_a_stall_are_named_on_every_surface() {
+        assert_eq!(ErrorKind::Forbidden.as_str(), "forbidden");
+        assert_eq!(ErrorKind::Forbidden.http_status(), 403);
+        assert_eq!(ErrorKind::Forbidden.mcp_code(), -32003);
+        assert_eq!(ErrorKind::Forbidden.exit_code(), 5);
+        assert_eq!(ErrorKind::Timeout.as_str(), "timeout");
+        assert_eq!(ErrorKind::Timeout.http_status(), 408);
+        assert_eq!(ErrorKind::Timeout.mcp_code(), -32004);
+        assert_eq!(ErrorKind::Timeout.exit_code(), 6);
+    }
+
+    /// Every kind gets its own number on every surface. Two kinds sharing one
+    /// would make the recovery a guess.
+    #[test]
+    fn no_two_kinds_share_a_number_on_any_surface() {
+        for a in ALL_KINDS {
+            for b in ALL_KINDS {
+                if a == b {
+                    continue;
+                }
+                assert_ne!(a.http_status(), b.http_status(), "{a:?} {b:?}");
+                assert_ne!(a.mcp_code(), b.mcp_code(), "{a:?} {b:?}");
+                assert_ne!(a.exit_code(), b.exit_code(), "{a:?} {b:?}");
+                assert_ne!(a.as_str(), b.as_str(), "{a:?} {b:?}");
+            }
+        }
+    }
+
+    /// The kind survives the flat form in both directions, which is what S7 asks
+    /// of a client that never saw the server's error enum.
+    #[test]
+    fn the_two_new_kinds_round_trip_through_the_wire_form() {
+        for kind in [ErrorKind::Forbidden, ErrorKind::Timeout] {
+            let wire = WireError::new(kind, "not your namespace");
+            let json = serde_json::to_string(&wire).expect("serialize");
+            let back: WireError = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back.kind, kind, "{json}");
+            assert_eq!(ErrorKind::from_exit_code(kind.exit_code()), Some(kind));
+        }
+    }
+
     /// Every mapping round-trips, so a surface that only has a status can recover
     /// the kind. A code that no surface produces is `None`, not `Internal`.
     #[test]
     fn every_exit_code_maps_back_to_its_kind() {
-        for kind in [
-            ErrorKind::NotFound,
-            ErrorKind::InvalidInput,
-            ErrorKind::Conflict,
-            ErrorKind::Internal,
-        ] {
+        for kind in ALL_KINDS {
             assert_eq!(ErrorKind::from_exit_code(kind.exit_code()), Some(kind));
         }
         assert_eq!(ErrorKind::from_exit_code(0), None);

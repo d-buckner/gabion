@@ -63,7 +63,9 @@ pub fn from_success<T: DeserializeOwned, Err: FromWire>(
 pub fn kind_for_status(status: u16) -> ErrorKind {
     match status {
         400 | 422 => ErrorKind::InvalidInput,
+        403 => ErrorKind::Forbidden,
         404 => ErrorKind::NotFound,
+        408 => ErrorKind::Timeout,
         409 => ErrorKind::Conflict,
         _ => ErrorKind::Internal,
     }
@@ -160,7 +162,9 @@ mod tests {
         for (status, kind) in [
             (400, ErrorKind::InvalidInput),
             (422, ErrorKind::InvalidInput),
+            (403, ErrorKind::Forbidden),
             (404, ErrorKind::NotFound),
+            (408, ErrorKind::Timeout),
             (409, ErrorKind::Conflict),
             (500, ErrorKind::Internal),
             (418, ErrorKind::Internal),
