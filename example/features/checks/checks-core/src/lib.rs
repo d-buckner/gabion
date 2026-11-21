@@ -264,4 +264,16 @@ impl<C: Caps> CheckService for CheckServiceImpl<C> {
         self.load(&input.0).await?;
         self.observations(&input.0).await
     }
+
+    async fn watch(&self, _ctx: &Ctx, input: CheckId) -> Result<Each<Probe>, CheckErr> {
+        self.load(&input.0).await?;
+        let history = self.observations(&input.0).await?;
+        Ok(Each::new(gabion::stream::from_vec(history)))
+    }
+
+    async fn tail(&self, _ctx: &Ctx, input: CheckId) -> Result<Latest<Probe>, CheckErr> {
+        self.load(&input.0).await?;
+        let history = self.observations(&input.0).await?;
+        Ok(Latest::new(gabion::stream::from_vec(history)))
+    }
 }

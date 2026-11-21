@@ -50,16 +50,13 @@ where
         let server = server.clone();
         let output = Arc::clone(&output);
         tasks.push(runtime.spawn(async move {
-            let Some(reply) = server.handle(&request).await else {
-                return;
+            let mut sink = LineSink {
+                output: Arc::clone(&output),
             };
-            let Ok(mut out) = output.lock() else {
-                return;
-            };
-            // Write and flush per message: a client blocked on a reply it cannot
-            // see is indistinguishable from a hung server.
-            if writeln!(out, "{reply}").is_ok() {
-                let _ = out.flush();
+            // A stream's notifications go out as they are produced; the answer
+            // goes out last, so a client never sees the count before the items.
+            if let Some(reply) = server.handle_with(&request, &mut sink).await {
+                sink.write(&reply);
             }
         }));
     }
@@ -70,6 +67,35 @@ where
         }
     });
     Ok(())
+}
+
+/// One message per line on the shared stdout.
+///
+/// The lock is taken per message, not per request: a stream's notifications have
+/// to reach the client while its answer is still being produced, and a client that
+/// reads a `tools/call` reply before the progress it names is reading a lie.
+struct LineSink<W> {
+    output: Arc<Mutex<W>>,
+}
+
+impl<W: Write> LineSink<W> {
+    fn write(&self, line: &str) {
+        let Ok(mut out) = self.output.lock() else {
+            return;
+        };
+        // Write and flush per message: a client blocked on a reply it cannot
+        // see is indistinguishable from a hung server.
+        if writeln!(out, "{line}").is_ok() {
+            let _ = out.flush();
+        }
+    }
+}
+
+impl<W: Write + Send> gabion::mcp::Emit for LineSink<W> {
+    fn emit(&mut self, line: String) -> gabion::stream::BoxFuture<'_, ()> {
+        self.write(&line);
+        Box::pin(async {})
+    }
 }
 
 /// Serve this process's stdin/stdout as an MCP server.

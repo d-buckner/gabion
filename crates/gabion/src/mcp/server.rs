@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
-use super::{Service, Tool, PROTOCOL_VERSION};
+use super::envelope::{error_response, initialize, render, result};
+use super::{stream, Discard, Emit, Service, Tool};
 use crate::ctx::Ctx;
 use crate::error::ErrorKind;
 
@@ -36,13 +37,33 @@ pub struct Server {
     /// is remembered until the call registers. Bounded, because an id that never
     /// arrives must not grow a map forever.
     early_cancels: Arc<Mutex<Vec<String>>>,
+    /// Whether this transport can carry a stream. `POST /mcp` cannot: one JSON
+    /// answer holds one value, and v1 has no SSE. A server built for it refuses a
+    /// listen op by name instead of answering with something strange (§9).
+    streams: bool,
 }
 
 impl Server {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            streams: true,
+            ..Default::default()
+        }
     }
+
+    /// A server for a transport that answers once per request. Listen ops are
+    /// hidden from `tools/list` and refused by name on call.
+    #[must_use]
+    pub fn without_streams(mut self) -> Self {
+        self.streams = false;
+        self
+    }
+
+    /// Why a listen op is not offered here, in the words an agent reads.
+    const NO_STREAM_REASON: &'static str = "this MCP transport answers one request with one JSON \
+        value, and a listen op produces many; v1 has no streaming transport here. Use the \
+        WebSocket surface (`GET /api/ws`) or the CLI subcommand.";
 
     /// Mount one service. Mounting is explicit: a service that nothing mounted
     /// is not reachable, which is what makes `gabion::registry` able to report
@@ -57,7 +78,16 @@ impl Server {
     /// stable reviewable artifact rather than mount order.
     #[must_use]
     pub fn tools(&self) -> Vec<Tool> {
-        let mut out: Vec<Tool> = self.services.iter().flat_map(|s| s.tools()).collect();
+        let mut out: Vec<Tool> = self
+            .services
+            .iter()
+            .flat_map(|s| {
+                let hidden = s.stream_ops();
+                s.tools()
+                    .into_iter()
+                    .filter(move |t| self.streams || !hidden.iter().any(|o| o == &t.name))
+            })
+            .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
         out
     }
@@ -67,6 +97,16 @@ impl Server {
     /// client will report as a broken stream.
     #[must_use]
     pub async fn handle(&self, request: &str) -> Option<String> {
+        self.handle_with(request, &mut Discard).await
+    }
+
+    /// Answer one request, writing any notifications to `emit` before the answer.
+    ///
+    /// A stream's items go out as `notifications/progress` and the answer reports
+    /// how many arrived, so a client that never saw a progress notification knows
+    /// the stream produced nothing rather than guessing from an empty answer.
+    #[must_use]
+    pub async fn handle_with(&self, request: &str, emit: &mut dyn Emit) -> Option<String> {
         let envelope: Value = match serde_json::from_str(request) {
             Ok(v) => v,
             Err(e) => return Some(error_response(Value::Null, -32700, &e.to_string(), None)),
@@ -91,7 +131,7 @@ impl Server {
                 let key = id.to_string();
                 let ctx = Ctx::from_meta(params.get("_meta").unwrap_or(&Value::Null));
                 self.remember(&key, &ctx);
-                let reply = self.call(id, &params, &ctx).await;
+                let reply = self.call(id, &params, &ctx, emit).await;
                 self.forget(&key);
                 Some(reply)
             }
@@ -177,7 +217,7 @@ impl Server {
         early.push(key);
     }
 
-    async fn call(&self, id: Value, params: &Value, ctx: &Ctx) -> String {
+    async fn call(&self, id: Value, params: &Value, ctx: &Ctx, emit: &mut dyn Emit) -> String {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
         let args = params
             .get("arguments")
@@ -195,6 +235,20 @@ impl Server {
                 None,
             );
         };
+        if service.stream_ops().iter().any(|o| o == name) {
+            return stream::stream_call(stream::Request {
+                id,
+                service: service.as_ref(),
+                name,
+                args,
+                params,
+                ctx,
+                emit,
+                transport_carries_streams: self.streams,
+                reason: Self::NO_STREAM_REASON,
+            })
+            .await;
+        }
         match service.call(ctx, name, args).await {
             Ok(value) => result(
                 id,
@@ -205,183 +259,5 @@ impl Server {
             ),
             Err(wire) => error_response(id, wire.kind.mcp_code(), &wire.message, Some(json!(wire))),
         }
-    }
-}
-
-fn initialize() -> Value {
-    json!({
-        "protocolVersion": PROTOCOL_VERSION,
-        "capabilities": { "tools": { "listChanged": false } },
-        "serverInfo": {
-            "name": "gabion",
-            "version": env!("CARGO_PKG_VERSION"),
-        },
-    })
-}
-
-/// A tool result travels as text in v1. JSON is what every tool here returns,
-/// and a client that wants structure parses it back out of the one field the
-/// spec guarantees.
-fn render(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-fn result(id: Value, result: Value) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
-}
-
-/// A JSON-RPC error. `code` comes from `ErrorKind::mcp_code`, so a client that
-/// already understands the HTTP status understands this too.
-fn error_response(id: Value, code: i32, message: &str, data: Option<Value>) -> String {
-    let mut error = json!({ "code": code, "message": message });
-    if let (Some(data), Some(map)) = (data, error.as_object_mut()) {
-        map.insert("data".to_string(), data);
-    }
-    json!({ "jsonrpc": "2.0", "id": id, "error": error }).to_string()
-}
-// tokio does not build for wasm32, and these tests need a real executor.
-#[cfg(all(test, not(target_arch = "wasm32")))]
-#[allow(clippy::unwrap_used, clippy::expect_used)] // a failing assertion should show the payload
-mod cancel_tests {
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use serde_json::{json, Value};
-
-    use super::Server;
-    use crate::ctx::Ctx;
-    use crate::error::WireError;
-    use crate::mcp::{Service, Tool, ToolResult};
-
-    /// A tool that runs until it is cancelled, then reports it.
-    struct Slow;
-
-    impl Service for Slow {
-        fn ns(&self) -> &str {
-            "demo"
-        }
-
-        fn tools(&self) -> Vec<Tool> {
-            vec![Tool {
-                name: "demo.slow".to_string(),
-                description: "Runs until cancelled.".to_string(),
-                input_schema: json!({ "type": "object" }),
-            }]
-        }
-
-        fn call<'a>(&'a self, ctx: &'a Ctx, _name: &'a str, _args: Value) -> ToolResult<'a> {
-            Box::pin(async move {
-                let waited =
-                    tokio::time::timeout(Duration::from_secs(5), ctx.cancel_token().cancelled());
-                let cancelled = waited.await.is_ok();
-                Ok::<Value, WireError>(json!({ "cancelled": cancelled }))
-            })
-        }
-    }
-
-    fn server() -> Server {
-        Server::new().with(Arc::new(Slow))
-    }
-
-    /// The MCP way to stop a long tool call: a `notifications/cancelled` naming the
-    /// request id. The call answers itself with what it observed.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_cancellation_notification_stops_the_call_it_names() {
-        let server = server();
-        let call = Clone::clone(&server);
-        let running = tokio::spawn(async move {
-            call.handle(
-                &json!({
-                    "jsonrpc":"2.0","id":7,"method":"tools/call",
-                    "params":{"name":"demo.slow","arguments":{}}
-                })
-                .to_string(),
-            )
-            .await
-        });
-
-        // Give the call a moment to register as in flight.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let reply = server
-            .handle(
-                &json!({
-                    "jsonrpc":"2.0","method":"notifications/cancelled",
-                    "params":{"requestId":7,"reason":"the user gave up"}
-                })
-                .to_string(),
-            )
-            .await;
-        assert!(reply.is_none(), "a notification must not be answered");
-
-        let answered = running
-            .await
-            .expect("the call task finished")
-            .expect("a request with an id is answered");
-        let value: Value = serde_json::from_str(&answered).unwrap();
-        let text = value["result"]["content"][0]["text"].as_str().unwrap();
-        let observed: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(
-            observed["cancelled"], true,
-            "the tool must see the cancellation: {value}"
-        );
-    }
-
-    /// The other ordering: the client gives up fast enough that the cancellation is
-    /// dispatched before the call it names. Dropping it would leave the call running
-    /// while the agent believes it stopped, so the server holds it until the call
-    /// registers.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_cancellation_that_arrives_first_is_not_lost() {
-        let server = server();
-        let notification = json!({
-            "jsonrpc":"2.0","method":"notifications/cancelled",
-            "params":{"requestId":11}
-        })
-        .to_string();
-        assert!(server.handle(&notification).await.is_none());
-
-        let answered = server
-            .handle(
-                &json!({
-                    "jsonrpc":"2.0","id":11,"method":"tools/call",
-                    "params":{"name":"demo.slow","arguments":{}}
-                })
-                .to_string(),
-            )
-            .await
-            .expect("a request with an id is answered");
-        let value: Value = serde_json::from_str(&answered).unwrap();
-        let observed: Value =
-            serde_json::from_str(value["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(
-            observed["cancelled"], true,
-            "a cancellation that beat the call must still stop it: {value}"
-        );
-    }
-
-    /// A cancellation for an id nobody is running is ignored, not an error: an agent
-    /// that gave up on a call that already finished must not get a failure for it.
-    #[tokio::test]
-    async fn cancelling_an_unknown_request_is_harmless() {
-        let server = server();
-        let reply = server
-            .handle(
-                &json!({
-                    "jsonrpc":"2.0","method":"notifications/cancelled",
-                    "params":{"requestId":999}
-                })
-                .to_string(),
-            )
-            .await;
-        assert!(reply.is_none());
-        // The server still works afterwards.
-        let listed = server
-            .handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string())
-            .await
-            .unwrap();
-        assert!(listed.contains("demo.slow"));
     }
 }

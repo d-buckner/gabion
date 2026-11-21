@@ -115,3 +115,9 @@ proc-macro2 = "1"
 # The stream trait gabion names in a signature. No runtime, no unsafe in its own
 # API, and it builds for wasm32-unknown-unknown.
 futures-core = "0.3"
+futures-util = "0.3"
+
+# Debug info is ~76% of a dev-profile binary here. Line tables keep backtraces
+# usable and drop about 90% of it.
+[profile.dev]
+debug = "line-tables-only"

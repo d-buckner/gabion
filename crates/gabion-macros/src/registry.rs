@@ -30,9 +30,27 @@ pub(crate) fn gen_registry(c: &Contract) -> proc_macro2::TokenStream {
     let mcp_fn = format_ident!("{}_mcp", ns);
     let server_mod = format_ident!("__{}_server", ns);
     let router_fn = format_ident!("{}_router", ns);
+    let ws_mod = format_ident!("__{}_ws", ns);
+    let ws_fn = format_ident!("{}_ws", ns);
     let cli_mod = format_ident!("__{}_cli", ns);
     let cli_fn = format_ident!("{}_cli_command", ns);
 
+    // A feature with no listen op generated no stream adapter, so it mounts no
+    // stream surface: the route appears only where something can serve it.
+    let ws_surface = if c.streams() {
+        quote! {
+            #[cfg(feature = "server")]
+            ws: ::core::option::Option::Some(::std::sync::Arc::new(
+                #ws_mod::#ws_fn(self.clone()),
+            ) as ::std::sync::Arc<dyn ::gabion::ws::WsService>),
+            #[cfg(not(feature = "server"))]
+            ws: ::core::option::Option::None,
+        }
+    } else {
+        quote! {
+            ws: ::core::option::Option::None,
+        }
+    };
     let ops: Vec<String> = c.methods.iter().map(|m| tool_name(ns, m)).collect();
     let routes: Vec<String> = c.methods.iter().map(|m| route(ns, m)).collect();
 
@@ -63,6 +81,9 @@ pub(crate) fn gen_registry(c: &Contract) -> proc_macro2::TokenStream {
                     )),
                     #[cfg(not(feature = "cli"))]
                     command: ::core::option::Option::None,
+                    // Only a feature with a listen op generated an adapter, so a
+                    // feature that does not stream still gets no `/api/ws` route.
+                    #ws_surface
                     #[cfg(feature = "mcp")]
                     mcp: ::core::option::Option::Some(::std::sync::Arc::new(#mcp_mod::#mcp_fn(
                         self,

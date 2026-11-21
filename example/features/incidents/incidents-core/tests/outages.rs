@@ -7,7 +7,7 @@
 use checks_api::{
     check_err, Check, CheckErr, CheckError, CheckId, CheckReport, CheckService, NewCheck, Probe,
 };
-use gabion::prelude::{service_impl, Ctx, ErrorKind};
+use gabion::prelude::{service_impl, Ctx, Each, ErrorKind, Latest};
 use gabion::testing::TestCaps;
 use incidents_api::{Incident, IncidentService};
 use incidents_core::IncidentServiceImpl;
@@ -51,6 +51,18 @@ impl CheckService for Stub {
             return Err(check_err(CheckError::NotFound));
         }
         Ok(self.history.clone())
+    }
+
+    async fn watch(&self, ctx: &Ctx, input: CheckId) -> Result<Each<Probe>, CheckErr> {
+        Ok(Each::new(gabion::stream::from_vec(
+            self.history(ctx, input).await?,
+        )))
+    }
+
+    async fn tail(&self, ctx: &Ctx, input: CheckId) -> Result<Latest<Probe>, CheckErr> {
+        Ok(Latest::new(gabion::stream::from_vec(
+            self.history(ctx, input).await?,
+        )))
     }
 }
 

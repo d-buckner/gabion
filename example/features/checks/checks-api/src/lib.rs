@@ -104,6 +104,14 @@ pub trait CheckService {
 
     /// Observations for one watch, oldest first.
     async fn history(&self, ctx: &Ctx, input: CheckId) -> Result<Vec<Probe>, CheckErr>;
+
+    /// The same observations as a stream, oldest first, ending when the stored
+    /// history runs out. `Each` because a caller reading a log wants all of it.
+    async fn watch(&self, ctx: &Ctx, input: CheckId) -> Result<Each<Probe>, CheckErr>;
+
+    /// The newest observation, and only the newest: a subscriber that is behind
+    /// sees the latest state rather than a queue of stale ones.
+    async fn tail(&self, ctx: &Ctx, input: CheckId) -> Result<Latest<Probe>, CheckErr>;
 }
 
 /// What a remote failure becomes in this app (see `gabion::error::FromWire`).

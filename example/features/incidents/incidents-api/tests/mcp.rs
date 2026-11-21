@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use checks_api::{CheckErr, CheckId, CheckReport, CheckService, NewCheck, Probe};
-use gabion::prelude::{service_impl, Ctx};
+use gabion::prelude::{service_impl, Ctx, Each, Latest};
 use incidents_api::{IncidentErr, IncidentService, Uptime};
 
 struct Stub;
@@ -27,6 +27,14 @@ impl CheckService for Stub {
     }
     async fn history(&self, _ctx: &Ctx, _input: CheckId) -> Result<Vec<Probe>, CheckErr> {
         Ok(Vec::new())
+    }
+
+    async fn watch(&self, _ctx: &Ctx, _input: CheckId) -> Result<Each<Probe>, CheckErr> {
+        Ok(Each::new(gabion::stream::from_vec(Vec::new())))
+    }
+
+    async fn tail(&self, _ctx: &Ctx, _input: CheckId) -> Result<Latest<Probe>, CheckErr> {
+        Ok(Latest::new(gabion::stream::from_vec(Vec::new())))
     }
 }
 

@@ -53,11 +53,12 @@ fn subscribe(streams: &MockStreams) -> Items<Reading, AppError> {
     let channel = streams
         .open(HttpRequest::post(URL, Vec::new()))
         .expect("scripted channel");
-    let frame = Frame::Open {
-        id: StreamId(1),
-        op: OP.into(),
-        input: serde_json::Value::Null,
-    };
+    let frame = Frame::open(
+        StreamId(1),
+        OP,
+        serde_json::Value::Null,
+        &gabion::Ctx::anonymous(),
+    );
     let sent: SendFrame<'_> = channel.send(frame);
     now(sent).expect("the write lands");
     Items::new(StreamId(1), "pulse", channel.incoming())
@@ -180,11 +181,12 @@ fn the_capability_records_the_open_frame_and_the_request_behind_it() {
     assert_eq!(streams.opened()[0].url, URL);
     assert_eq!(
         streams.written(),
-        vec![Frame::Open {
-            id: StreamId(1),
-            op: OP.into(),
-            input: serde_json::Value::Null,
-        }],
+        vec![Frame::open(
+            StreamId(1),
+            OP,
+            serde_json::Value::Null,
+            &gabion::Ctx::anonymous()
+        )],
         "the frame the client wrote, in the shape the server reads it"
     );
 }
@@ -197,11 +199,12 @@ fn a_closed_channel_stops_without_claiming_a_clean_end() {
     let channel = streams
         .open(HttpRequest::post(URL, Vec::new()))
         .expect("scripted channel");
-    now(channel.send(Frame::Open {
-        id: StreamId(1),
-        op: OP.into(),
-        input: serde_json::Value::Null,
-    }))
+    now(channel.send(Frame::open(
+        StreamId(1),
+        OP,
+        serde_json::Value::Null,
+        &gabion::Ctx::anonymous(),
+    )))
     .expect("the write lands");
     let mut stream = Items::new(StreamId(1), "pulse", channel.incoming());
     assert_eq!(poll_once(&mut stream), Some(Ok(Reading { frame: 1 })));
@@ -215,4 +218,54 @@ fn a_closed_channel_stops_without_claiming_a_clean_end() {
             .contains("without an end"),
         "{after:?}"
     );
+}
+
+/// `Each<T>` promises every item, so gabion will not drop one to keep a connection
+/// moving, and it will not buffer without bound to avoid that either (§5, §7.3).
+/// The honest shape is that the subscriber waits.
+///
+/// Driven by a stalled script rather than a wall clock: the mock hands two items
+/// and then never produces another frame and never claims an end. The proof is
+/// what does not happen — no third item, no end, no error, and nothing written
+/// beyond the one `open` the client sent.
+#[test]
+fn a_lossless_stream_blocks_instead_of_growing_without_bound() {
+    let streams = MockStreams::new().script(URL, Script::stalling(vec![reading(1), reading(2)]));
+    let mut items = subscribe(&streams);
+    assert_eq!(poll_one(&mut items), Poll3::Item(Ok(Reading { frame: 1 })));
+    assert_eq!(poll_one(&mut items), Poll3::Item(Ok(Reading { frame: 2 })));
+    // The third poll parks. A bound that dropped the item would have produced an
+    // `end` or an `error` here, and §7.4 says only the client may end this stream.
+    assert_eq!(poll_one(&mut items), Poll3::Parked, "the stall must park");
+    assert_eq!(
+        poll_one(&mut items),
+        Poll3::Parked,
+        "a second poll must not invent a terminator"
+    );
+    assert_eq!(
+        streams.written().len(),
+        1,
+        "nothing may be written on a stalled stream's behalf: {:?}",
+        streams.written()
+    );
+}
+
+/// One poll of a stream, with "nothing yet" told apart from "ended".
+///
+/// `poll_once` folds the two together, which is right for draining and wrong for a
+/// test whose whole point is that the stream did not end.
+#[derive(Debug, PartialEq)]
+enum Poll3 {
+    Item(Result<Reading, AppError>),
+    Parked,
+    Ended,
+}
+
+fn poll_one(stream: &mut Items<Reading, AppError>) -> Poll3 {
+    let mut cx = Context::from_waker(Waker::noop());
+    match Pin::new(&mut *stream).poll_next(&mut cx) {
+        Poll::Ready(Some(next)) => Poll3::Item(next),
+        Poll::Ready(None) => Poll3::Ended,
+        Poll::Pending => Poll3::Parked,
+    }
 }

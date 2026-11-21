@@ -18,6 +18,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -135,6 +136,63 @@ policy_marker!(Each);
 policy_marker!(Latest);
 debug_marker!(Each);
 debug_marker!(Latest);
+
+/// Await the next item of a stream.
+///
+/// gabion deliberately does not depend on `futures-util`, so the one combinator
+/// every surface needs — take the next item — is written once here.
+pub fn next<'a, S: Stream + Unpin>(stream: &'a mut S) -> Next<'a, S> {
+    Next { stream }
+}
+
+/// The future [`next`] returns.
+#[derive(Debug)]
+pub struct Next<'a, S> {
+    stream: &'a mut S,
+}
+
+impl<S: Stream + Unpin> Future for Next<'_, S> {
+    type Output = Option<S::Item>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<S::Item>> {
+        Pin::new(&mut self.get_mut().stream).poll_next(cx)
+    }
+}
+
+/// A stream that hands out `items` in order and then ends.
+///
+/// The one source gabion provides, because a core may compose streams but may not
+/// source them (§8) — and composing still needs something to compose *from*. A
+/// real source arrives from a capability; this is the shape a finished, finite
+/// collection takes on its way to a marker.
+/// Written twice for the same reason [`BoxStream`] is split: on native a thread
+/// must be able to hold the stream, and on wasm there is no thread to hold it.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn from_vec<T: Send + Unpin + 'static>(items: Vec<T>) -> BoxStream<'static, T> {
+    Box::pin(VecStream {
+        items: items.into_iter(),
+    })
+}
+
+/// A stream that hands out `items` in order and then ends.
+#[cfg(target_arch = "wasm32")]
+pub fn from_vec<T: Unpin + 'static>(items: Vec<T>) -> BoxStream<'static, T> {
+    Box::pin(VecStream {
+        items: items.into_iter(),
+    })
+}
+
+struct VecStream<T> {
+    items: std::vec::IntoIter<T>,
+}
+
+impl<T: Unpin> Stream for VecStream<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<T>> {
+        Poll::Ready(self.get_mut().items.next())
+    }
+}
 
 /// Why a stream ended, as the surface reports it.
 ///

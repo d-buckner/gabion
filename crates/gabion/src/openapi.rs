@@ -18,6 +18,7 @@ pub struct OpenApi {
     version: String,
     tag: String,
     paths: Map<String, Value>,
+    streams: Map<String, Value>,
     error: Option<Value>,
 }
 
@@ -46,6 +47,7 @@ impl OpenApi {
             version: version.into(),
             tag: tag.into(),
             paths: Map::new(),
+            streams: Map::new(),
             error: None,
         }
     }
@@ -104,6 +106,14 @@ impl OpenApi {
         self.paths.insert(path.to_string(), Value::Object(item));
     }
 
+    /// One listen op. A stream has no route to describe, so it is not a `paths`
+    /// entry; it is named here instead, and the committed document still fails its
+    /// snapshot test when a stream op drifts.
+    pub fn stream(&mut self, op: &str, policy: &str, item: Schema) {
+        self.streams
+            .insert(op.to_string(), json!({ "policy": policy, "item": item }));
+    }
+
     /// The finished document, with every schema the paths referenced under
     /// `components/schemas`.
     #[must_use]
@@ -113,7 +123,7 @@ impl OpenApi {
         if let Some(error) = &self.error {
             components.insert("responses".to_string(), json!({ "Error": error }));
         }
-        json!({
+        let mut doc = json!({
             "openapi": "3.1.0",
             "info": {
                 "title": self.title,
@@ -122,7 +132,15 @@ impl OpenApi {
             },
             "paths": Value::Object(self.paths.clone()),
             "components": Value::Object(components),
-        })
+        });
+        // Root-level extension, so a validator that does not know it ignores it and
+        // a reviewer who does can still diff it. Absent rather than empty: a feature
+        // with no listen op must publish the document it published before streams
+        // existed, not that document plus a key.
+        if !self.streams.is_empty() {
+            doc["x-gabion-streams"] = Value::Object(self.streams.clone());
+        }
+        doc
     }
 }
 

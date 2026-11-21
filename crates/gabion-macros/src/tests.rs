@@ -129,24 +129,29 @@ fn a_unit_input_is_still_allowed_after_the_context() {
 }
 
 #[test]
-fn a_streaming_return_is_a_hard_error() {
+fn a_streaming_return_without_a_policy_is_a_hard_error() {
     // Every surface assumes one value: schemars schemas it, the client parses one
-    // body, the CLI renders one. Failing here beats an E0038 from generated code.
+    // body, the CLI renders one. And there is no default policy to fall back on,
+    // because the policy selects the loop the host runs. Failing here beats an
+    // E0038 from generated code and beats picking a flow rule nobody chose.
     let msg = err_of(
         "pub trait S {
         async fn watch(&self, ctx: &Ctx) -> Result<impl Stream<Item = u8>, E>;
     }",
     );
     assert!(
-        msg.contains("streaming returns are not supported"),
-        "expected the streaming error, got: {msg}"
+        msg.contains("an unmarked stream return is refused"),
+        "expected the unmarked-stream refusal, got: {msg}"
+    );
+    assert!(
+        msg.contains("Each<T>") && msg.contains("Latest<T>"),
+        "the refusal must name the two markers that exist, got: {msg}"
     );
 }
 
-/// There is no default policy, because there is no unmarked stream shape. A
-/// `BoxStream` is dyn-compatible and spells nothing the token scan already knew,
-/// so without this it reaches the value generators and the author gets a
-/// schemars failure for a decision they never made.
+/// A `BoxStream` is dyn-compatible and spells nothing the token scan already knew,
+/// so without this it reaches the value generators and the author gets a schemars
+/// failure for a decision they never made.
 #[test]
 fn a_stream_marker_that_is_not_each_or_latest_is_a_hard_error() {
     let msg = err_of(
@@ -155,39 +160,67 @@ fn a_stream_marker_that_is_not_each_or_latest_is_a_hard_error() {
     }",
     );
     assert!(
-        msg.contains("streaming returns are not supported"),
-        "expected the streaming error, got: {msg}"
-    );
-    assert!(
-        msg.contains("Each<T>") && msg.contains("Latest<T>"),
-        "the refusal must name the two markers that do exist, got: {msg}"
-    );
-    assert!(
-        msg.contains("no unmarked stream shape"),
-        "the refusal must say there is no default policy, got: {msg}"
+        msg.contains("an unmarked stream return is refused"),
+        "expected the unmarked-stream refusal, got: {msg}"
     );
 }
 
-/// The markers are decided before the surfaces that carry them. Handing one to
-/// the value generators is the E0277-out-of-generated-code failure the refusal
-/// exists to prevent, so it stays a refusal until the WebSocket stage lifts it.
+/// A marker with nothing inside it has no item type to decode an `item` frame into.
 #[test]
-fn the_stream_policy_markers_are_refused_as_reserved() {
-    for marker in ["Each", "Latest", "::gabion::stream::Latest"] {
-        let msg = err_of(&format!(
-            "pub trait S {{
-            async fn watch(&self, ctx: &Ctx) -> Result<{marker}<Frame>, E>;
-        }}"
-        ));
-        assert!(
-            msg.contains("reserved for streaming") && msg.contains("not built yet"),
-            "`{marker}` must be refused as reserved-but-unbuilt, got: {msg}"
-        );
-        assert!(
-            msg.contains("docs/streaming.md"),
-            "the refusal must point at the decision, got: {msg}"
-        );
-    }
+fn a_marker_with_no_item_type_is_a_hard_error() {
+    let msg = err_of(
+        "pub trait S {
+        async fn watch(&self, ctx: &Ctx) -> Result<Each, E>;
+    }",
+    );
+    assert!(
+        msg.contains("take the item type"),
+        "expected the malformed-marker refusal, got: {msg}"
+    );
+}
+
+/// The marker is what makes a listen op a listen op, and it is a named type in the
+/// signature, so `.gabion/surfaces.lock` hashes it. A policy carried by an
+/// attribute could flip and change the loop every surface runs without moving the
+/// lock, which is the whole reason the policy is a type.
+#[test]
+fn a_policy_marker_makes_the_op_a_listen_op_on_every_surface() {
+    let out = expand_src(
+        "pub trait S {
+        async fn watch(&self, ctx: &Ctx) -> Result<Each<Frame>, E>;
+    }",
+    );
+    let text = match out {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("a marked stream return must expand: {e}"),
+    };
+    // The stream adapter exists, and it reports the policy the signature chose.
+    assert!(text.contains("__s_ws"), "no stream adapter was generated");
+    assert!(
+        text.contains(":: gabion :: ws :: Policy :: Each"),
+        "the adapter must report `Each`, not infer one"
+    );
+    // The op is absent from the ordinary HTTP routes: one value per response is
+    // not a shape a stream fits.
+    assert!(
+        !text.contains("__h_watch"),
+        "a listen op must not get an HTTP route"
+    );
+}
+
+/// A feature with no listen op generates no stream adapter at all, so it mounts no
+/// stream surface and the host gains no `/api/ws` route. That is the
+/// "byte-identical to today" half of docs/streaming.md §5, made structural.
+#[test]
+fn a_feature_that_never_streams_generates_no_stream_adapter() {
+    let text = match expand_src(CLEAN) {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("a clean contract must expand: {e}"),
+    };
+    assert!(
+        !text.contains("__todo_ws"),
+        "a feature with no listen op must not gain a stream adapter"
+    );
 }
 
 #[test]

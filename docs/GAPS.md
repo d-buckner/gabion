@@ -40,7 +40,9 @@ closed with tests and recorded in §7.
 | "one trait, four surfaces" (README headline, spec §5) | All four exist: clap, axum, MCP over JSON-RPC, and a typed client that *is* the service trait implemented over `Http`. |
 | auto-registration via `linkme` (spec §4) | Built, but not with `linkme` (§7). `#[service]` emits `mount_on` on the trait object and a host names only the impl. The browser host uses it too, which the linker version could not. |
 | "the wasm target fails on `std::fs` / `std::net` / `std::thread` / `tokio`" | False on the pinned toolchain, as §7 records. The effect wall is the `clippy.toml` ban list plus `core-runtime-dep`. |
-| "MCP via rmcp" (spec §5) | Deliberately not a dependency (§7). The runtime speaks the three methods this framework uses (`initialize`, `tools/list`, `tools/call`) over JSON-RPC 2.0, and every path is tested in-repo. No SSE stream: a tool call answers once. |
+| "MCP via rmcp" (spec §5) | Deliberately not a dependency (§7). The runtime speaks the three methods this framework uses (`initialize`, `tools/list`, `tools/call`) over JSON-RPC 2.0, and every path is tested in-repo. No SSE stream: over `POST /mcp` a tool call
+answers once, and a listen op is refused there by name. stdio is full duplex, so a
+listen op there emits one `notifications/progress` per item before its result. |
 | `gabion dev` (spec §9) | Built as a watch/rebuild/restart loop over one host binary. It does not start a wasm bundler: that is `serve.sh` in an app that has one, and wiring it here is a host decision. |
 | Generated conformance suite across all four adapters (spec §8) | Built, with one honest hole: a *create* is not repeatable, so the cases are observations and failures (see §8). |
 | a `*-core` that names a runtime outside the banned list | `core-runtime-dep` reads an enumerated list (`tokio`, `axum`, `reqwest`, `sqlx`, …). A crate outside it gets through, and so does any effect outside `clippy.toml`'s enumerated paths. That is a wall with edges, not a proof. |
@@ -60,14 +62,17 @@ recorded in §7.
 - **Portable components.** A panel can be composed inside its app; it cannot travel
   to another app, because it uses its app's `*-shared` kit. A headless/themeable kit
   would be a product of its own, and deliberately not this one.
-- **Streaming surfaces** (`Stream` return support) — **decided**: v1, the policy in
-  the return type, full duplex, on one feature-namespaced WebSocket per host
-  ([streaming.md](streaming.md)). What exists now is still only the refusal: a
-  streaming return is a compile error with a reason (§7), rather than surfaces that
-  cannot carry a stream. The decision names a hole the refusal does not currently
-  cover: `is_streaming` scans the return type for `impl` and `Stream`, so a
-  `Latest<T>` return walks past it into the value generators (streaming.md §11,
-  stage 0).
+- **Streaming surfaces** (`Stream` return support) — **built**, all six stages of
+  [streaming.md](streaming.md). The policy travels in the return type as `Each<T>`
+  or `Latest<T>`, so it is in the signature and therefore in the lock hash; a
+  streaming return with no marker is a compile error with a reason, and so is a
+  marker with no item type. One host serves one `GET /api/ws`, and the namespace
+  wall is enforced at both ends. The edges the design accepts and the code does not
+  hide: `POST /mcp` refuses a listen op by name, because one JSON answer cannot
+  carry N items and v1 has no SSE (§9); a slow `Each` subscriber backpressures the
+  whole connection, because there is one write queue per connection (§5); and the
+  client has no reader task of its own, so a frame is moved when someone polls —
+  which is why a reader that goes away hands the read side to whoever is left.
 - **`Ctx` cancellation over HTTP.** The MCP half is built
   (`notifications/cancelled`, §7); HTTP has no cancel channel because a dropped
   connection cancels the handler future, and a client that stopped listening learns

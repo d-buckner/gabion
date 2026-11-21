@@ -35,7 +35,7 @@ fn the_page_can_name_the_operations_it_holds() {
     let ops = host_pulse_web::exposed_ops();
     assert_eq!(
         ops,
-        "check.add,check.history,check.list,check.probe,check.sweep,\
+        "check.add,check.history,check.list,check.probe,check.sweep,check.tail,check.watch,\
 incident.evaluate,incident.list,incident.uptime"
     );
 }

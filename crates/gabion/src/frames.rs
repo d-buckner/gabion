@@ -41,6 +41,11 @@ pub enum Frame {
         op: String,
         #[serde(default)]
         input: Value,
+        /// The caller, as `Ctx::to_meta`. §7.6: a frame is a call like any other,
+        /// so it carries who is calling. Absent means an anonymous caller, which
+        /// is what a timer or a test is.
+        #[serde(default, skip_serializing_if = "Value::is_null")]
+        meta: Value,
     },
     /// Client to server: an ordinary op of a feature that streams, sent on the
     /// connection instead of as a separate POST (§5).
@@ -49,6 +54,9 @@ pub enum Frame {
         op: String,
         #[serde(default)]
         input: Value,
+        /// The caller, as `Ctx::to_meta`.
+        #[serde(default, skip_serializing_if = "Value::is_null")]
+        meta: Value,
     },
     /// Client to server: stop a stream this client opened.
     Close { id: StreamId },
@@ -68,6 +76,37 @@ pub enum Frame {
 }
 
 impl Frame {
+    /// The frame a client writes to start a stream.
+    #[must_use]
+    pub fn open(id: StreamId, op: impl Into<String>, input: Value, ctx: &crate::ctx::Ctx) -> Self {
+        Frame::Open {
+            id,
+            op: op.into(),
+            input,
+            meta: ctx.to_meta(),
+        }
+    }
+
+    /// The frame a client writes to run one ordinary op of a feature that streams.
+    #[must_use]
+    pub fn call(id: StreamId, op: impl Into<String>, input: Value, ctx: &crate::ctx::Ctx) -> Self {
+        Frame::Call {
+            id,
+            op: op.into(),
+            input,
+            meta: ctx.to_meta(),
+        }
+    }
+
+    /// The caller a frame names, or an anonymous one when it names nobody.
+    #[must_use]
+    pub fn ctx(&self) -> crate::ctx::Ctx {
+        match self {
+            Frame::Open { meta, .. } | Frame::Call { meta, .. } => crate::ctx::Ctx::from_meta(meta),
+            _ => crate::ctx::Ctx::anonymous(),
+        }
+    }
+
     /// The stream this frame belongs to.
     #[must_use]
     pub fn id(&self) -> StreamId {
@@ -167,17 +206,15 @@ mod tests {
 
     #[test]
     fn every_shape_round_trips() {
+        let ctx = crate::ctx::Ctx::anonymous().with_principal("agent-7");
         let frames = vec![
-            Frame::Open {
-                id: StreamId(1),
-                op: "todo.watch".into(),
-                input: serde_json::json!({}),
-            },
-            Frame::Call {
-                id: StreamId(2),
-                op: "todo.create".into(),
-                input: serde_json::json!({"title": "milk"}),
-            },
+            Frame::open(StreamId(1), "todo.watch", serde_json::json!({}), &ctx),
+            Frame::call(
+                StreamId(2),
+                "todo.create",
+                serde_json::json!({"title": "milk"}),
+                &crate::ctx::Ctx::anonymous(),
+            ),
             Frame::Close { id: StreamId(3) },
             Frame::Item {
                 id: StreamId(4),
@@ -203,6 +240,29 @@ mod tests {
             assert_eq!(back, frame, "{json}");
             assert_eq!(back.id(), frame.id());
         }
+    }
+
+    /// §7.6: a frame is a call like any other, so it carries who is calling. A
+    /// surface that filled in an anonymous `Ctx` for every frame would make every
+    /// stream caller the same anonymous principal.
+    #[test]
+    fn a_frame_carries_who_is_calling() {
+        let ctx = crate::ctx::Ctx::anonymous()
+            .with_principal("agent-7")
+            .with_tenant("acme");
+        let frame = Frame::open(StreamId(1), "todo.watch", Value::Null, &ctx);
+        let back: Frame =
+            serde_json::from_str(&serde_json::to_string(&frame).expect("json")).expect("frame");
+        let read = back.ctx();
+        assert_eq!(read.principal(), Some("agent-7"));
+        assert_eq!(read.tenant(), Some("acme"));
+
+        let anonymous = Frame::Close { id: StreamId(2) };
+        assert_eq!(
+            anonymous.ctx().principal(),
+            None,
+            "a frame that names no caller is an anonymous one, not a guess"
+        );
     }
 
     /// The namespace wall is one comparison, and it is this one (§5).

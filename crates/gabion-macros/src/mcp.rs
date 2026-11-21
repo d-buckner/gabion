@@ -20,7 +20,22 @@ pub(crate) fn gen_mcp(c: &Contract) -> proc_macro2::TokenStream {
     let mcp_ident = format_ident!("{}Mcp", base);
     let mcp_fn = format_ident!("{}_mcp", ns);
     let tools = c.methods.iter().map(|m| tool(ns, m));
-    let arms = c.methods.iter().map(|m| arm(ns, m));
+    let arms = c
+        .methods
+        .iter()
+        .filter(|m| m.stream.is_none())
+        .map(|m| arm(ns, m));
+    let stream_ops: Vec<String> = c
+        .methods
+        .iter()
+        .filter_map(|m| m.stream.map(|_| tool_name(ns, m).to_string()))
+        .collect();
+    let stream_arms: Vec<proc_macro2::TokenStream> = c
+        .methods
+        .iter()
+        .filter_map(|m| m.stream.map(|_| stream_arm(ns, m)))
+        .collect();
+    let stream_methods = stream_methods(&stream_ops, &stream_arms, ns_literal);
 
     quote! {
         #[doc(hidden)]
@@ -31,6 +46,7 @@ pub(crate) fn gen_mcp(c: &Contract) -> proc_macro2::TokenStream {
 
             /// One service as MCP sees it: the trait object plus the tool list
             /// generated from the trait.
+            #[derive(Clone)]
             pub struct #mcp_ident {
                 svc: ::std::sync::Arc<dyn #trait_ident + ::core::marker::Send + ::core::marker::Sync>,
             }
@@ -79,6 +95,37 @@ pub(crate) fn gen_mcp(c: &Contract) -> proc_macro2::TokenStream {
                             )),
                         }
                     })
+                }
+
+                #stream_methods
+            }
+        }
+    }
+}
+
+/// One listen op: start it, and hand its items over as JSON values.
+fn stream_arm(ns: &str, m: &Method) -> proc_macro2::TokenStream {
+    let name = tool_name(ns, m);
+    let id = &m.ident;
+    let parse = match &m.input {
+        Some(ty) => quote! {
+            let input: #ty = match ::gabion::mcp::arguments(#name, args) {
+                ::core::result::Result::Ok(v) => v,
+                ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
+            };
+        },
+        None => quote! { let input = (); let _ = args; },
+    };
+    quote! {
+        #name => {
+            #parse
+            let started = self.svc.#id(ctx, input).await;
+            match started {
+                ::core::result::Result::Ok(marker) => ::core::result::Result::Ok(
+                    ::gabion::ws::encode_items(marker.into_stream()),
+                ),
+                ::core::result::Result::Err(e) => {
+                    ::core::result::Result::Err(::gabion::mcp::wire_of(&e))
                 }
             }
         }
@@ -138,6 +185,37 @@ fn arm(ns: &str, m: &Method) -> proc_macro2::TokenStream {
                     ::core::result::Result::Err(::gabion::mcp::wire_of(&e))
                 }
             }
+        }
+    }
+}
+
+/// The two `Service` methods a listen op needs, built apart from `gen_mcp` so the
+/// ordinary half of the adapter stays a reading of one dispatch table.
+fn stream_methods(
+    stream_ops: &[String],
+    stream_arms: &[proc_macro2::TokenStream],
+    ns_literal: &str,
+) -> proc_macro2::TokenStream {
+    quote! {
+        fn stream_ops(&self) -> ::std::vec::Vec<String> {
+            ::std::vec![#(#stream_ops.to_string()),*]
+        }
+
+        fn stream<'a>(
+            &'a self,
+            ctx: &'a ::gabion::ctx::Ctx,
+            name: &'a str,
+            args: ::gabion::serde_json::Value,
+        ) -> ::gabion::mcp::StreamResult<'a> {
+            ::std::boxed::Box::pin(async move {
+                match name {
+                    #(#stream_arms)*
+                    other => ::core::result::Result::Err(::gabion::error::WireError::new(
+                        ::gabion::error::ErrorKind::NotFound,
+                        format!("`{other}` is not a listen op on {}", #ns_literal),
+                    )),
+                }
+            })
         }
     }
 }

@@ -3,7 +3,7 @@
 
 use quote::{format_ident, quote};
 
-use crate::{route, Contract};
+use crate::{route, tool_name, Contract};
 
 pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
     let ns = &c.ns;
@@ -47,8 +47,12 @@ pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
 /// One axum handler per method. Each reads the caller from its headers before it
 /// looks at the body, because a route that parses first and identifies later
 /// gives an anonymous caller a parser.
+///
+/// A listen op gets none: one JSON body cannot carry N items, and a route that
+/// returned them one at a time would be a second, worse WebSocket. The op is
+/// served on `/api/ws` instead, and named in `x-gabion-streams`.
 fn gen_handlers(c: &Contract) -> proc_macro2::TokenStream {
-    let handlers = c.methods.iter().map(|m| {
+    let handlers = c.methods.iter().filter(|m| m.stream.is_none()).map(|m| {
         let id = &m.ident;
         let hid = format_ident!("__h_{}", m.snake);
         let parse = match &m.input {
@@ -112,7 +116,7 @@ fn gen_handlers(c: &Contract) -> proc_macro2::TokenStream {
 
 fn gen_routes(c: &Contract) -> proc_macro2::TokenStream {
     let ns = &c.ns;
-    let routes = c.methods.iter().map(|m| {
+    let routes = c.methods.iter().filter(|m| m.stream.is_none()).map(|m| {
         let hid = format_ident!("__h_{}", m.snake);
         let route = route(ns, m);
         quote! { .route(#route, ::axum::routing::post(#hid)) }
@@ -129,7 +133,7 @@ fn gen_openapi(c: &Contract) -> proc_macro2::TokenStream {
     let openapi_fn = format_ident!("{}_openapi", ns);
     let methods = &c.methods;
 
-    let paths = methods.iter().map(|m| {
+    let paths = methods.iter().filter(|m| m.stream.is_none()).map(|m| {
         let path = route(ns, m);
         let operation_id = format!("{}_{}", ns, m.snake);
         let summary = &m.summary;
@@ -151,6 +155,17 @@ fn gen_openapi(c: &Contract) -> proc_macro2::TokenStream {
                 response: __response,
             });
         }
+    });
+
+    let streams = methods.iter().filter_map(|m| {
+        let policy = m.stream?;
+        let op = tool_name(ns, m);
+        let output = &m.output;
+        let policy = policy.as_str();
+        Some(quote! {
+            let __item: ::schemars::Schema = generator.subschema_for::<#output>();
+            doc.stream(#op, #policy, __item);
+        })
     });
 
     quote! {
@@ -175,6 +190,7 @@ fn gen_openapi(c: &Contract) -> proc_macro2::TokenStream {
             );
             doc.error_response(generator.subschema_for::<::gabion::error::WireError>());
             #(#paths)*
+            #(#streams)*
             doc.finish(generator.take_definitions(true))
         }
     }

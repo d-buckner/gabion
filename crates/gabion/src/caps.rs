@@ -247,6 +247,24 @@ pub trait Streams: Clone + Send + Sync + 'static {
     fn open(&self, request: HttpRequest) -> Result<Channel, StreamError>;
 }
 
+/// The `Streams` capability of a process that has no socket: it refuses, by name.
+///
+/// A generated client builds one of these when its host gave it only `Http`, so a
+/// stream call fails with the reason instead of the client failing to compile.
+/// The alternative — a client generic only over `Http` and a stream method that
+/// cannot exist — would make one listen op unbuildable for every wasm host.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoStreams;
+
+impl Streams for NoStreams {
+    fn open(&self, request: HttpRequest) -> Result<Channel, StreamError> {
+        Err(StreamError::Transport(format!(
+            "this client has no stream transport; build it with `with_streams` to call `{}`",
+            request.url
+        )))
+    }
+}
+
 /// Bundle of capabilities a host injects into service impls.
 /// Apps extend this pattern with their own associated types per feature.
 pub trait Caps: Clone + Send + Sync + 'static {

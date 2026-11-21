@@ -353,5 +353,19 @@
         ]
       }
     }
+  },
+  "x-gabion-streams": {
+    "check.tail": {
+      "item": {
+        "$ref": "#/components/schemas/Probe"
+      },
+      "policy": "latest"
+    },
+    "check.watch": {
+      "item": {
+        "$ref": "#/components/schemas/Probe"
+      },
+      "policy": "each"
+    }
   }
 }
