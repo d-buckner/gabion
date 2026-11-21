@@ -159,7 +159,8 @@ Each row names a shortcut and the block. The rule id is what the gate prints.
 | A hand-written axum handler in a feature | `axum-outside-host`. The HTTP surface is generated; a hand-written route is one the OpenAPI document, the MCP tool and the client do not know about. |
 | A workspace with no `*-core` | `no-wasm-proof`. The wasm step would otherwise pass having built nothing. |
 | A `*-core` that implements nothing | `empty-core`. A placeholder core makes the wasm build green about a wall nothing stands behind. |
-| A streaming return in a `#[service]` trait | A hard compile error: no surface carries a stream in v1, and generating them anyway produced an E0038 from code the author did not write. |
+| A streaming return in a `#[service]` trait | A hard compile error today: no surface carries a stream yet, and generating them anyway produced an E0038 from code the author did not write. [streaming.md](streaming.md) is the decided shape and the stage that lifts this refusal; until then `Latest` / `Each` are reserved and refused by name. |
+| A stream response that stops without its terminator line | Not built yet, and it is the fail-open the design would otherwise ship: a reset body must read as a transport failure, never as a clean end (streaming.md §7). |
 | A changed input or output type on an existing op | `surface-snapshot`, whose lines carry a hash of the signature. |
 | A TODO in a test file, or a 900-line test | `no-todo`, `file-length`, `too-many-branches` — `tests/` is scanned by the shape rules. |
 | A `#[surface(..)]` or `#[internal]` left in a contract | The macro refuses to compile. Per-method surface attributes are gone. |

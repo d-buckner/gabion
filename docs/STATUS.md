@@ -24,8 +24,9 @@ rule — including `over-broad-visibility`, `axum-outside-host`,
 
 ## Not built
 
-Streaming surfaces (the refusal is built, the feature is the spec's open v1/v2
-question); an HTTP cancellation channel (MCP has one); `gabion host add`; a UI
+Streaming surfaces (the refusal is built, the shape is decided in
+[docs/streaming.md](streaming.md), and none of the feature is built yet); an HTTP
+cancellation channel (MCP has one); `gabion host add`; a UI
 gallery; a renderer other than Dioxus.
 
 ## Claimed, with edges — and the doc says where
