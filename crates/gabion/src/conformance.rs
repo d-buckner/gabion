@@ -164,6 +164,92 @@ pub fn ok_value<T: Serialize>(value: &T) -> Value {
     }
 }
 
+/// What one surface delivered for a listen op: the items, and how it ended.
+///
+/// Termination is part of the answer. A surface that dropped the last third of a
+/// stream and reported it as finished would otherwise look identical to one that
+/// delivered everything, which is the fail-open §7.4 names.
+#[must_use]
+pub fn stream_value(items: Vec<Value>, end: &str) -> Value {
+    serde_json::json!({ "items": items, "end": end })
+}
+
+/// A stream that never started, as the suite compares it. The refusal is the
+/// result, so a surface that refuses is reported rather than skipped.
+#[must_use]
+pub fn refused_value(why: &str) -> Value {
+    serde_json::json!({ "items": [], "end": why })
+}
+
+/// Drain a stream into the JSON values the suite compares.
+///
+/// Takes the marker shape any surface returns — anything that yields items — so
+/// the in-process impl and the generated client are collected by the same code
+/// and cannot be collected differently.
+pub async fn collect<S>(mut stream: S) -> Vec<Value>
+where
+    S: crate::stream::Stream + Unpin,
+    S::Item: Serialize,
+{
+    let mut out = Vec::new();
+    while let Some(item) = crate::stream::next(&mut stream).await {
+        out.push(ok_value(&item));
+    }
+    out
+}
+
+/// The CLI's newline-delimited output, read back as items.
+///
+/// A line that is not JSON is a surface that printed prose where the contract
+/// promised items, so it is reported as an item that failed rather than skipped.
+#[must_use]
+pub fn ndjson_value(text: &str) -> Value {
+    let mut items = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Value>(line) {
+            Ok(v) => items.push(v),
+            Err(e) => return refused_value(&format!("stdout line is not JSON: {e}")),
+        }
+    }
+    stream_value(items, "done")
+}
+
+/// What the MCP stdio transport answered for a listen op: the items it sent as
+/// progress notifications, and the end its final result reported.
+#[must_use]
+pub fn mcp_stream_value(reply: &str, notifications: &[String]) -> Value {
+    let Ok(answer) = serde_json::from_str::<Value>(reply) else {
+        return refused_value("<the mcp reply is not JSON>");
+    };
+    if let Some(error) = answer.get("error") {
+        return refused_value(&error.to_string());
+    }
+    let end = answer
+        .pointer("/result/structuredContent/end")
+        .and_then(Value::as_str)
+        .unwrap_or("<no end reported>");
+    let mut items = Vec::new();
+    for line in notifications {
+        let Ok(note) = serde_json::from_str::<Value>(line) else {
+            return refused_value("<a progress notification is not JSON>");
+        };
+        match note
+            .pointer("/params/message")
+            .and_then(Value::as_str)
+            .map(serde_json::from_str::<Value>)
+        {
+            Some(Ok(item)) => items.push(item),
+            // A notification the suite cannot read is a surface that sent
+            // something other than an item, which is a disagreement to show.
+            _ => return refused_value("<a progress notification carried no item>"),
+        }
+    }
+    stream_value(items, end)
+}
+
 /// A failure that arrived as a bare `WireError` — from the MCP tool path or from
 /// the CLI's exit — as the suite compares it.
 #[must_use]

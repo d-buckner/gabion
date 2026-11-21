@@ -51,11 +51,17 @@ pub struct Surfaces {
     pub command: Option<Box<dyn Any + Send>>,
     /// `Some` when built with `mcp`.
     pub mcp: Option<Arc<dyn crate::mcp::Service>>,
+    /// `Some` when built with `server` and the contract has a listen op.
+    pub ws: Option<Arc<dyn crate::ws::WsService>>,
 }
 
 /// A mounted namespace and the MCP view of it, used only to sort before building
 /// one server out of several.
 type SortedService = (String, Arc<dyn crate::mcp::Service>);
+
+/// The same pair for the stream surface: one connection serves every namespace,
+/// so the list is sorted once rather than assembled in mount order.
+type SortedStreams = (String, Arc<dyn crate::ws::WsService>);
 
 /// The composition root's view: what it mounted, and what it can serve.
 #[derive(Default)]
@@ -120,6 +126,19 @@ impl Host {
             .collect()
     }
 
+    /// Every mounted service the stream surface can serve, sorted by namespace so
+    /// the connection does not depend on mount order.
+    #[must_use]
+    pub fn ws(&self) -> Vec<Arc<dyn crate::ws::WsService>> {
+        let mut services: Vec<SortedStreams> = self
+            .mounted
+            .iter()
+            .filter_map(|m| m.ws.clone().map(|s| (s.ns().to_string(), s)))
+            .collect();
+        services.sort_by(|a, b| a.0.cmp(&b.0));
+        services.into_iter().map(|(_, svc)| svc).collect()
+    }
+
     /// Every mounted service as one MCP server, sorted by namespace so the tool
     /// list does not depend on mount order.
     #[must_use]
@@ -158,6 +177,7 @@ mod tests {
             router: None,
             command: None,
             mcp: None,
+            ws: None,
         }
     }
 

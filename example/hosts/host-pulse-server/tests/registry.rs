@@ -23,12 +23,19 @@ fn the_host_mounts_both_contracts_by_naming_only_the_impls() {
             "check.list",
             "check.probe",
             "check.sweep",
+            "check.tail",
+            "check.watch",
             "incident.evaluate",
             "incident.list",
             "incident.uptime",
         ]
     );
     assert_eq!(host.routers().len(), 2, "one generated router each");
+    // Only checks streams, so only checks contributes a stream surface. A feature
+    // with no listen op must not gain a `/api/ws` handler it cannot serve.
+    let mounted = host.ws();
+    let streams: Vec<&str> = mounted.iter().map(|s| s.ns()).collect();
+    assert_eq!(streams, vec!["check"]);
 }
 
 /// The MCP server the stdio transport serves is the same mounted set, so an
@@ -45,6 +52,8 @@ fn the_mcp_server_is_the_mounted_set() {
             "check.list",
             "check.probe",
             "check.sweep",
+            "check.tail",
+            "check.watch",
             "incident.evaluate",
             "incident.list",
             "incident.uptime",
@@ -65,7 +74,7 @@ fn mounting_one_contract_twice_is_visible() {
     checks.mount_on(&mut host);
     assert_eq!(host.mounted(), vec!["check", "check"]);
     // `mcp()` sorts by namespace and keeps both, so the duplicate is not hidden.
-    assert_eq!(host.mcp().unwrap().tools().len(), 10);
+    assert_eq!(host.mcp().unwrap().tools().len(), 14);
 }
 
 /// And the incidents contract really is independent of checks here: this host

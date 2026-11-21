@@ -156,5 +156,22 @@ fn the_stdio_transport_answers_the_same_server() {
     let init: Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "gabion");
     let list: Value = serde_json::from_str(lines[1]).unwrap();
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 8);
+    let tools: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    // Stdio carries a stream, so a listen op is a tool here. The count is the
+    // point, not the number: an op the trait declares and `tools/list` hides is
+    // an op no agent can find.
+    assert!(
+        tools.contains(&"check.watch") && tools.contains(&"check.tail"),
+        "the listen ops must be offered over stdio, got: {tools:?}"
+    );
+    assert_eq!(
+        tools.len(),
+        10,
+        "every declared op must be listed: {tools:?}"
+    );
 }

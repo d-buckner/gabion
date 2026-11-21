@@ -13,7 +13,7 @@
 
 use quote::{format_ident, quote};
 
-use crate::{route, Contract, Method};
+use crate::{route, tool_name, Contract, Method, Policy};
 
 /// The remote impl. Feature-gated on `client`, which is on by default: a contract
 /// with no client is a contract a wasm renderer cannot call.
@@ -24,47 +24,180 @@ pub(crate) fn gen_client(c: &Contract) -> proc_macro2::TokenStream {
     let methods = c.methods.iter().map(|m| method(&c.ns, m));
     let async_trait = crate::async_trait_attrs();
 
-    quote! {
-        /// The service trait, implemented over `Http`: the same methods, the same
-        /// wire types, and the same error type as the in-process impl.
-        ///
-        /// `base` is the other process's root (`http://127.0.0.1:3456`); each call
-        /// POSTs to `{base}/api/<ns>.<method>`. The caller's `Ctx` travels as
-        /// headers, so an identity set here is the identity the other end reads.
-        #[cfg(feature = "client")]
-        pub struct #client_ident<H: ::gabion::caps::Http> {
-            base: ::std::string::String,
-            http: H,
-        }
+    // A feature that streams needs a socket as well as `Http`, so the client gains
+    // a second capability parameter. It is added only when something streams, and
+    // `new` stays in a one-parameter impl, so a host that never streams writes
+    // exactly what it wrote before.
+    if !c.streams() {
+        return quote! {
+            /// The service trait, implemented over `Http`: the same methods, the same
+            /// wire types, and the same error type as the in-process impl.
+            ///
+            /// `base` is the other process's root (`http://127.0.0.1:3456`); each call
+            /// POSTs to `{base}/api/<ns>.<method>`. The caller's `Ctx` travels as
+            /// headers, so an identity set here is the identity the other end reads.
+            #[cfg(feature = "client")]
+            pub struct #client_ident<H: ::gabion::caps::Http> {
+                base: ::std::string::String,
+                http: H,
+            }
 
-        #[cfg(feature = "client")]
-        impl<H: ::gabion::caps::Http> #client_ident<H> {
-            #[must_use]
-            pub fn new(base: impl ::core::convert::Into<::std::string::String>, http: H) -> Self {
-                Self {
-                    // A trailing slash in the base would produce `//api/...`,
-                    // which some proxies 404 and nobody enjoys debugging.
-                    base: base.into().trim_end_matches('/').to_string(),
-                    http,
+            #[cfg(feature = "client")]
+            impl<H: ::gabion::caps::Http> #client_ident<H> {
+                #[must_use]
+                pub fn new(base: impl ::core::convert::Into<::std::string::String>, http: H) -> Self {
+                    Self {
+                        // A trailing slash in the base would produce `//api/...`,
+                        // which some proxies 404 and nobody enjoys debugging.
+                        base: base.into().trim_end_matches('/').to_string(),
+                        http,
+                    }
+                }
+
+                #[must_use]
+                pub fn base(&self) -> &str {
+                    &self.base
                 }
             }
 
+            #[cfg(feature = "client")]
+            #(#async_trait)*
+            impl<H: ::gabion::caps::Http> #trait_ident for #client_ident<H> {
+                #(#methods)*
+            }
+        };
+    }
+
+    quote! {
+        /// The service trait, implemented over `Http` and, for its listen ops, over
+        /// the host's `Streams` capability. Same methods, same wire types, same
+        /// error type as the in-process impl.
+        ///
+        /// One `/api/ws` connection serves the whole feature: a listen op opens a
+        /// stream on it, and the feature's other ops travel over it as `call` frames
+        /// once that stream is open (§5).
+        #[cfg(feature = "client")]
+        pub struct #client_ident<H: ::gabion::caps::Http, S: ::gabion::caps::Streams> {
+            base: ::std::string::String,
+            http: H,
+            conn: ::gabion::ws::Connection<S>,
+        }
+
+        #[cfg(feature = "client")]
+        impl<H: ::gabion::caps::Http, S: ::gabion::caps::Streams> #client_ident<H, S> {
             #[must_use]
             pub fn base(&self) -> &str {
                 &self.base
+            }
+
+            /// The client that can stream: `Http` for the ordinary calls made
+            /// before any stream is open, and the capability that dials `/api/ws`.
+            #[must_use]
+            pub fn with_streams(
+                base: impl ::core::convert::Into<::std::string::String>,
+                http: H,
+                streams: S,
+            ) -> Self {
+                let base = base.into().trim_end_matches('/').to_string();
+                let conn = ::gabion::ws::Connection::new(format!("{base}/api/ws"), streams);
+                Self {
+                    base,
+                    http,
+                    conn,
+                }
+            }
+        }
+
+        /// A client built without a socket still compiles, and its listen ops fail
+        /// by name rather than being missing: a contract cannot offer a host an op
+        /// it has no way to reach.
+        #[cfg(feature = "client")]
+        impl<H: ::gabion::caps::Http> #client_ident<H, ::gabion::caps::NoStreams> {
+            #[must_use]
+            pub fn new(base: impl ::core::convert::Into<::std::string::String>, http: H) -> Self {
+                Self::with_streams(base, http, ::gabion::caps::NoStreams)
             }
         }
 
         #[cfg(feature = "client")]
         #(#async_trait)*
-        impl<H: ::gabion::caps::Http> #trait_ident for #client_ident<H> {
+        impl<H: ::gabion::caps::Http, S: ::gabion::caps::Streams> #trait_ident
+            for #client_ident<H, S>
+        {
             #(#methods)*
         }
     }
 }
 
-/// One method, forwarded as a POST with the caller's headers attached.
+/// One method. An ordinary op is a POST with the caller's headers attached; a
+/// listen op opens a stream on the connection and decodes `item` frames.
 fn method(ns: &str, m: &Method) -> proc_macro2::TokenStream {
+    match m.stream {
+        Some(policy) => stream_method(ns, m, policy),
+        None => http_method(ns, m),
+    }
+}
+
+/// A listen op: open on `/api/ws`, then decode. The `call` frames of the same
+/// namespace travel on the same connection (§5), which is why the client holds one
+/// connection rather than one per op.
+fn stream_method(ns: &str, m: &Method, policy: Policy) -> proc_macro2::TokenStream {
+    let id = &m.ident;
+    let op = tool_name(ns, m);
+    let output = &m.output;
+    let error = &m.error;
+    let marker = match policy {
+        Policy::Each => quote! { ::gabion::stream::Each },
+        Policy::Latest => quote! { ::gabion::stream::Latest },
+    };
+    let (param, encode) = input_encoding(m);
+    quote! {
+        async fn #id(
+            &self,
+            ctx: &::gabion::ctx::Ctx,
+            #param,
+        ) -> ::core::result::Result<#marker<#output>, #error> {
+            #encode
+            let items = match self
+                .conn
+                .stream::<#output, #error>(#op, encoded, ctx)
+                .await
+            {
+                ::core::result::Result::Ok(v) => v,
+                ::core::result::Result::Err(wire) => {
+                    return ::core::result::Result::Err(<#error as ::gabion::error::FromWire>::from_wire(wire))
+                }
+            };
+            ::core::result::Result::Ok(#marker::new(::gabion::ws::decode_items::<#output, #error>(items)))
+        }
+    }
+}
+
+/// The `input` parameter and the code that turns it into bytes or a `Value`.
+fn input_encoding(m: &Method) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+    let error_ty = &m.error;
+    match &m.input {
+        Some(ty) => (
+            quote! { input: #ty },
+            quote! {
+                let encoded = match ::gabion::serde_json::to_value(&input) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return ::core::result::Result::Err(::gabion::client::transport::<#error_ty>(
+                            format!("input did not serialize: {e}"),
+                        ))
+                    }
+                };
+            },
+        ),
+        None => (
+            quote! { _input: () },
+            quote! { let encoded = ::gabion::serde_json::Value::Null; },
+        ),
+    }
+}
+
+fn http_method(ns: &str, m: &Method) -> proc_macro2::TokenStream {
     let id = &m.ident;
     let path = route(ns, m);
     let output = &m.output;

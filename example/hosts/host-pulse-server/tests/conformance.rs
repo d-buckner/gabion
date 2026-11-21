@@ -45,6 +45,7 @@ async fn all_four_surfaces_agree_on_observations() {
     let checks_report = checks_api::check_conformance(
         checks,
         gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
         &base,
         &check_cases,
     )
@@ -91,6 +92,7 @@ async fn all_four_surfaces_agree_on_failures() {
     let mut report = checks_api::check_conformance(
         checks,
         gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
         &base,
         check_cases,
     )
@@ -136,9 +138,14 @@ async fn a_case_no_adapter_implements_is_a_failure() {
     let base = serve(checks.clone(), incidents.clone()).await;
     let cases = [Case::new("check.nope", json!({}))];
 
-    let report =
-        checks_api::check_conformance(checks, gabion_native::ReqwestHttp::new(), &base, &cases)
-            .await;
+    let report = checks_api::check_conformance(
+        checks,
+        gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
+        &base,
+        &cases,
+    )
+    .await;
     let _ = incidents;
     assert!(!report.is_clean());
     assert!(
@@ -146,4 +153,80 @@ async fn a_case_no_adapter_implements_is_a_failure() {
         "{}",
         report.summary()
     );
+}
+
+/// A listen op is a case like any other (§9 `conformance` row): items, how the
+/// stream ended, and the same comparison across all four adapters.
+///
+/// Both policies are driven, because they are different promises and a suite that
+/// drove only one would leave the other untested while the op list looked complete.
+///
+/// The watch is created and probed before the suite runs, so the history every
+/// surface streams is already fixed. Streaming a watch that the suite also created
+/// would not be repeatable, and four surfaces comparing four different calls
+/// proves nothing.
+#[tokio::test]
+async fn every_stream_op_is_driven_through_every_built_adapter() {
+    let (checks, incidents) = host_pulse_server::services();
+    let base = serve(checks.clone(), incidents.clone()).await;
+    let ctx = gabion::Ctx::anonymous().with_principal("conformance");
+    let created = checks
+        .add(
+            &ctx,
+            checks_api::NewCheck {
+                name: "streamed".to_string(),
+                url: "http://127.0.0.1:1/never".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    checks
+        .probe(&ctx, CheckId(created.id.clone()))
+        .await
+        .unwrap();
+
+    let cases = [
+        Case::new("check.watch", json!(&created.id)),
+        Case::new("check.tail", json!(&created.id)),
+    ];
+    let report = checks_api::check_conformance(
+        checks,
+        gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
+        &base,
+        &cases,
+    )
+    .await;
+    assert_eq!(
+        report.ran(),
+        2,
+        "both listen ops must be driven: {}",
+        report.summary()
+    );
+    assert!(report.is_clean(), "{}", report.summary());
+    for agreement in &report.agreements {
+        // Each surface delivered items and named how its stream ended. A surface
+        // that answered with one value instead of a list would fail here, and that
+        // is the failure mode §9 exists to catch.
+        assert!(
+            agreement.inproc["items"].is_array(),
+            "{} did not compare an item list: {}",
+            agreement.op,
+            agreement.inproc
+        );
+        assert!(
+            !agreement.inproc["items"].as_array().unwrap().is_empty(),
+            "{} streamed nothing: {}",
+            agreement.op,
+            agreement.inproc
+        );
+        assert_eq!(
+            agreement.inproc["end"], "done",
+            "{}: {}",
+            agreement.op, agreement.inproc
+        );
+        assert_eq!(agreement.cli, agreement.inproc, "{} cli", agreement.op);
+        assert_eq!(agreement.mcp, agreement.inproc, "{} mcp", agreement.op);
+        assert_eq!(agreement.http, agreement.inproc, "{} http", agreement.op);
+    }
 }

@@ -23,10 +23,15 @@ use gabion::mcp::Server;
 /// A notification answers `204 No Content` — JSON-RPC has no reply for one, and a
 /// client that receives an empty JSON body where it expected silence is entitled
 /// to treat it as a protocol error.
-pub fn mcp_router(server: Arc<Server>) -> axum::Router {
+///
+/// One request, one JSON answer, so a listen op is refused here by name and is not
+/// listed as a tool at all. That is the written exception to "every method reaches
+/// every surface" (docs/streaming.md §9): v1 has no SSE, and a tool that returned
+/// the first item and dropped the rest would be worse than no tool.
+pub fn mcp_router(server: Server) -> axum::Router {
     axum::Router::new()
         .route("/mcp", post(handle))
-        .with_state(server)
+        .with_state(Arc::new(server.without_streams()))
 }
 
 async fn handle(State(server): State<Arc<Server>>, body: String) -> axum::response::Response {
@@ -49,16 +54,21 @@ async fn handle(State(server): State<Arc<Server>>, body: String) -> axum::respon
 /// and asked what it serves.
 pub fn host_router(host: &mut gabion::registry::Host) -> axum::Router {
     let mcp = host.mcp();
+    let streams = host.ws();
     let mut app = axum::Router::new();
     for boxed in host.routers() {
         if let Ok(router) = boxed.downcast::<axum::Router>() {
             app = app.merge(*router);
         }
     }
-    match mcp {
-        Some(server) => app.merge(mcp_router(Arc::new(server))),
+    let app = match mcp {
+        Some(server) => app.merge(mcp_router(server)),
         None => app,
-    }
+    };
+    // One endpoint for every streaming feature, mounted the way `/mcp` is: a host
+    // that mounted a service that streams gets the route, and one that did not
+    // gets no route rather than one that answers nothing.
+    app.merge(crate::ws::ws_router(streams))
 }
 
 /// Every mounted subcommand, for a host that builds one clap tree over several

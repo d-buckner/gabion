@@ -36,13 +36,19 @@ pub trait ChannelDriver {
 /// A boxed driver. `Send + Sync` where a thread can hold one, and not where it
 /// cannot — the same split as [`BoxStream`], for the same reason.
 #[cfg(not(target_arch = "wasm32"))]
-type Driver = Box<dyn ChannelDriver + Send + Sync>;
+type Driver = std::sync::Arc<dyn ChannelDriver + Send + Sync>;
 
 /// A boxed driver.
 #[cfg(target_arch = "wasm32")]
-type Driver = Box<dyn ChannelDriver>;
+type Driver = std::sync::Arc<dyn ChannelDriver>;
 
 /// One opened channel: send frames out, take frames in, close it.
+///
+/// A handle, not the socket: cloning one is cloning a reference to the same
+/// channel, which is what a client needs — the connection is shared by every
+/// stream and every `call` of the feature that opened it. Dropping the last handle
+/// is what closes it.
+#[derive(Clone)]
 pub struct Channel {
     driver: Driver,
 }
@@ -56,7 +62,7 @@ impl Channel {
     #[must_use]
     pub fn new(driver: impl ChannelDriver + Send + Sync + 'static) -> Self {
         Self {
-            driver: Box::new(driver),
+            driver: std::sync::Arc::new(driver),
         }
     }
 
@@ -65,7 +71,7 @@ impl Channel {
     #[must_use]
     pub fn new(driver: impl ChannelDriver + 'static) -> Self {
         Self {
-            driver: Box::new(driver),
+            driver: std::sync::Arc::new(driver),
         }
     }
 

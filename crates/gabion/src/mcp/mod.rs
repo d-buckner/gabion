@@ -32,7 +32,9 @@ pub type ToolResult<'a> = Pin<Box<dyn Future<Output = Result<Value, WireError>> 
 /// because every field this server reads has been stable across them.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 
+mod envelope;
 mod server;
+mod stream;
 pub use server::Server;
 
 /// One tool, as `tools/list` publishes it. Built from the same method the HTTP
@@ -150,6 +152,71 @@ pub trait Service: Send + Sync {
     /// Run one tool. `name` is the full dotted name, so a call for another
     /// service's tool is an error rather than a silently ignored argument.
     fn call<'a>(&'a self, ctx: &'a Ctx, name: &'a str, args: Value) -> ToolResult<'a>;
+
+    /// The listen ops this service publishes. Empty for a service that does not
+    /// stream, which is every service that predates streaming.
+    fn stream_ops(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Start one listen op and hand back its items as JSON values.
+    ///
+    /// Only the stdio transport can carry these: one JSON answer cannot hold N
+    /// items, so a transport that has nowhere to put them refuses rather than
+    /// answering with something strange (§9).
+    fn stream<'a>(&'a self, ctx: &'a Ctx, name: &'a str, args: Value) -> StreamResult<'a> {
+        let _ = (ctx, name, args);
+        Box::pin(async {
+            Err(WireError::new(
+                ErrorKind::NotFound,
+                "this service has no listen ops",
+            ))
+        })
+    }
+}
+
+/// One listen op's items, once the op has accepted the call.
+pub type StreamResult<'a> = crate::stream::BoxFuture<
+    'a,
+    Result<crate::stream::BoxStream<'static, Result<Value, WireError>>, WireError>,
+>;
+
+/// Where a JSON-RPC message goes out.
+///
+/// A response is one string, which is why `Server::handle` could return one. A
+/// stream needs N messages before the answer, so a transport hands `handle`
+/// somewhere to write them. Written as a trait rather than a closure because
+/// writing to a socket is awaited, and an `async FnMut` cannot be spelled.
+pub trait Emit: Send {
+    /// Write one message. Never fails: a transport that cannot write has already
+    /// said so where it can, and a stream must not invent a second failure path.
+    fn emit(&mut self, line: String) -> crate::stream::BoxFuture<'_, ()>;
+}
+
+/// A sink that keeps what it was given. The conformance suite reads a stream's
+/// progress notifications back out of it, so the suite needs somewhere to put
+/// them without a socket or a stdout.
+#[derive(Default)]
+pub struct Collect {
+    /// Every message written so far, in order.
+    pub lines: Vec<String>,
+}
+
+impl Emit for Collect {
+    fn emit(&mut self, line: String) -> crate::stream::BoxFuture<'_, ()> {
+        self.lines.push(line);
+        Box::pin(async {})
+    }
+}
+
+/// The sink for a transport with nowhere to send notifications: an HTTP request
+/// that gets one answer, or a test that only looks at the reply.
+pub struct Discard;
+
+impl Emit for Discard {
+    fn emit(&mut self, _line: String) -> crate::stream::BoxFuture<'_, ()> {
+        Box::pin(async {})
+    }
 }
 
 // tokio does not build for wasm32, and these tests need a real executor.

@@ -33,6 +33,8 @@ mod conformance;
 mod mcp;
 mod registry;
 mod server;
+mod streams;
+mod ws;
 use attrs::async_trait_attrs;
 use cli::gen_cli;
 use client::gen_client;
@@ -40,7 +42,9 @@ use conformance::gen_conformance;
 use mcp::gen_mcp;
 use registry::gen_registry;
 use server::gen_server;
+use streams::{read_return, Policy};
 use syn::{parse_macro_input, ItemTrait, TraitItem, Type};
+use ws::gen_ws;
 
 /// One method's worth of parsed info for the surface generators.
 pub(crate) struct Method {
@@ -53,6 +57,13 @@ pub(crate) struct Method {
     /// failure that crossed the wire has to come back as the app's own error
     /// type, not as `serde_json::Value`.
     pub(crate) error: Type,
+    /// `Some` for a listen op: the flow policy its return marker declared.
+    ///
+    /// Read off `Each<T>` or `Latest<T>` rather than off an attribute, because the
+    /// marker is a named type in the signature and `.gabion/surfaces.lock` hashes
+    /// signatures. An attribute would let a policy flip move behaviour without
+    /// moving the lock.
+    pub(crate) stream: Option<Policy>,
     /// First line of the method's doc comment; empty when it has none.
     pub(crate) summary: String,
     /// The rest of the doc comment, empty when there is nothing beyond the first
@@ -86,6 +97,15 @@ pub(crate) struct Contract {
     pub(crate) trait_ident: proc_macro2::Ident,
     pub(crate) trait_name: String,
     pub(crate) methods: Vec<Method>,
+}
+
+impl Contract {
+    /// Whether any op in the trait streams. A feature that streams puts all of its
+    /// ops on the connection; one that does not is byte-identical to before
+    /// (docs/streaming.md §5).
+    pub(crate) fn streams(&self) -> bool {
+        self.methods.iter().any(|m| m.stream.is_some())
+    }
 }
 
 /// `#[async_trait]` for a hand-written `impl` of a `#[service]` trait.
@@ -159,9 +179,11 @@ fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let mcp = gen_mcp(&c);
     let registration = gen_registry(&c);
     let conformance = gen_conformance(&c);
+    let ws = gen_ws(&c);
     Ok(quote! {
         #cleaned
         #server
+        #ws
         #cli
         #client
         #mcp
@@ -218,8 +240,7 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             ));
         }
 
-        reject_stream_return(&m.sig)?;
-        let Some((output, Some(error))) = result_args(&m.sig.output) else {
+        let Some((declared, Some(error))) = result_args(&m.sig.output) else {
             return Err(syn::Error::new_spanned(
                 &m.sig.output,
                 "every #[service] method returns `Result<T, E>`:\n\n    \
@@ -228,6 +249,7 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
                  so a method that cannot fail uses `Result<T, Infallible>`.",
             ));
         };
+        let (output, stream) = read_return(&declared)?;
         let (summary, description) = doc_summary(&m.attrs);
         methods.push(Method {
             ident: m.sig.ident.clone(),
@@ -235,50 +257,13 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             input: input_ty,
             output,
             error,
+            stream,
             summary,
             description,
         });
     }
     Ok(methods)
 }
-
-/// A return that needs a stream, refused either way it is spelled.
-///
-/// Split out of `collect_methods` because the two refusals are one decision with
-/// two messages, and the calling convention is already the busiest part of that
-/// function.
-fn reject_stream_return(sig: &syn::Signature) -> syn::Result<()> {
-    let Some((output, _)) = result_args(&sig.output) else {
-        return Ok(());
-    };
-    if is_stream_marker(&output) {
-        return Err(syn::Error::new_spanned(&output, MARKERS_NOT_BUILT));
-    }
-    if is_streaming(&output) {
-        return Err(syn::Error::new_spanned(&output, NO_UNMARKED_STREAM));
-    }
-    Ok(())
-}
-
-/// The message for a return that names a policy marker. The markers are decided
-/// (`docs/streaming.md` §4.3) and the surfaces that would carry them are not,
-/// and the gap has to be a compile error rather than a schemars failure.
-const MARKERS_NOT_BUILT: &str = "`Each<T>` and `Latest<T>` are reserved for streaming and are \
-                                 not built yet: no surface can carry a stream, so a method that \
-                                 returns one has no adapter. Return a value, or read \
-                                 docs/streaming.md section 11 for the stage that lifts this. \
-                                 This is \
-                                 a deliberate compile error rather than surfaces that cannot work.";
-
-/// The message for a stream return that names no policy. The policy is the
-/// marker, so an unmarked stream has no policy to run — and no default exists,
-/// because dropping items and delivering every item are different promises.
-const NO_UNMARKED_STREAM: &str = "streaming returns are not supported: a stream carries its \
-                                  policy in the type, as `Each<T>` (every item) or `Latest<T>` \
-                                  (the newest), and there is no unmarked stream shape to default. \
-                                  #[service] builds four surfaces from one signature, and none of \
-                                  them carries a stream yet (docs/streaming.md). Return a value, \
-                                  or take the streaming operation out of this trait.";
 
 /// A return type that would need a stream but names no policy: `impl Stream`, a
 /// bare `Stream`, or gabion's own `BoxStream`.
@@ -301,17 +286,6 @@ fn is_streaming(output: &Type) -> bool {
 ///
 /// The last path segment is what the convention is about, the way [`is_ctx`]
 /// matches `Ctx`: `gabion::stream::Latest<T>` and a re-export of it are the same
-/// declaration, and a wall that depends on how someone imported it is not a wall.
-fn is_stream_marker(output: &Type) -> bool {
-    let Type::Path(p) = output else {
-        return false;
-    };
-    p.path
-        .segments
-        .last()
-        .is_some_and(|seg| seg.ident == "Each" || seg.ident == "Latest")
-}
-
 /// `&Ctx`, `&gabion::Ctx`, `&crate::Ctx`: the type's last segment is what the
 /// convention is about, since a contract may import or fully qualify it.
 fn is_ctx(ty: &Type) -> bool {

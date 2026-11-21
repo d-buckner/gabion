@@ -69,6 +69,32 @@ pub fn render_json<T: Serialize>(value: &T) -> Result<String, CliExit> {
     })
 }
 
+/// Render a stream as newline-delimited JSON: one item per line, and nothing else
+/// on stdout, so a caller can pipe a listen op into `jq`.
+///
+/// The whole stream is rendered before it is returned. A host that wants to flush
+/// line by line drives the stream itself; the generated subcommand uses this, and
+/// an op that ends early is not a subcommand that exits 0.
+pub async fn render_ndjson<S>(stream: S) -> Result<String, CliExit>
+where
+    S: crate::stream::Stream + Unpin,
+    S::Item: Serialize,
+{
+    let mut stream = stream;
+    let mut out = String::new();
+    while let Some(item) = crate::stream::next(&mut stream).await {
+        let line = crate::serde_json::to_string(&item).map_err(|e| {
+            CliExit::new(
+                ErrorKind::Internal,
+                format!("stream item did not serialize: {e}"),
+            )
+        })?;
+        out.push_str(&line);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)] // a failing assertion should name the exit code
 mod tests {

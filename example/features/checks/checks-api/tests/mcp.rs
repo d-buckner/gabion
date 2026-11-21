@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use checks_api::{Check, CheckErr, CheckId, CheckService, NewCheck, Probe};
-use gabion::prelude::{service_impl, Ctx};
+use gabion::prelude::{service_impl, Ctx, Each, Latest};
 
 struct Stub;
 
@@ -38,6 +38,14 @@ impl CheckService for Stub {
     async fn history(&self, _ctx: &Ctx, _input: CheckId) -> Result<Vec<Probe>, CheckErr> {
         unreachable!("this test only calls add and list")
     }
+
+    async fn watch(&self, _ctx: &Ctx, _input: CheckId) -> Result<Each<Probe>, CheckErr> {
+        unreachable!("this test only calls add and list")
+    }
+
+    async fn tail(&self, _ctx: &Ctx, _input: CheckId) -> Result<Latest<Probe>, CheckErr> {
+        unreachable!("this test only calls add and list")
+    }
 }
 
 async fn ask(request: gabion::serde_json::Value) -> gabion::serde_json::Value {
@@ -62,8 +70,47 @@ async fn every_op_in_the_trait_is_a_tool() {
             "check.history",
             "check.list",
             "check.probe",
-            "check.sweep"
+            "check.sweep",
+            // A listen op is a tool on a transport that can carry it. The stdio
+            // server can; `POST /mcp` cannot, and refuses it by name instead.
+            "check.tail",
+            "check.watch",
         ]
+    );
+}
+
+/// The written exception (docs/streaming.md §9): one JSON answer cannot carry N
+/// items, so a listen op is not offered over `POST /mcp` at all, and a call that
+/// names it anyway is refused in words an agent can act on.
+#[tokio::test]
+async fn a_listen_op_is_not_a_tool_over_a_one_answer_transport() {
+    let svc: Arc<dyn CheckService + Send + Sync> = Arc::new(Stub);
+    let server = gabion::mcp::Server::new()
+        .without_streams()
+        .with(Arc::new(checks_api::__check_mcp::check_mcp(svc)));
+    let listed: Vec<String> = server.tools().into_iter().map(|t| t.name).collect();
+    assert!(
+        !listed
+            .iter()
+            .any(|n| n == "check.watch" || n == "check.tail"),
+        "a transport that answers once must not advertise a stream: {listed:?}"
+    );
+
+    let reply = server
+        .handle(
+            &gabion::serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "check.watch", "arguments": "x" }
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    let answer: gabion::serde_json::Value = gabion::serde_json::from_str(&reply).unwrap();
+    let message = answer["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("one JSON value") && message.contains("/api/ws"),
+        "the refusal names why and where to go instead: {message}"
     );
 }
 

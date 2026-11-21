@@ -27,6 +27,7 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 gabion = { workspace = true }
+futures-util = { workspace = true }
 # `conformance` turns on all four adapter features for the *test* build only: the
 # suite drives the generated clap tree and the generated client against the routes
 # this host serves, and the server binary should not carry clap to do it.

@@ -49,32 +49,7 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
         }
     });
 
-    let dispatch_arms = exposed.iter().map(|m| {
-        let name = m.snake.to_string();
-        let id = &m.ident;
-        let call = match &m.input {
-            Some(ty) => quote! {
-                {
-                    let raw = sm.get_one::<String>("json").cloned().unwrap_or_else(|| "null".into());
-                    let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
-                        ::gabion::cli::CliExit::new(
-                            ::gabion::error::ErrorKind::InvalidInput,
-                            format!("bad --json: {e}"),
-                        )
-                    })?;
-                    svc.#id(&ctx, input).await
-                }
-            },
-            None => quote! { svc.#id(&ctx, ()).await },
-        };
-        quote! {
-            Some((#name, sm)) => #call
-                // One projection for every failure: the exit carries the same
-                // wire envelope the route sends, so the four surfaces compare.
-                .map_err(|e| ::gabion::cli::CliExit::from_service(&e))
-                .and_then(|v| ::gabion::cli::render_json(&v)),
-        }
-    });
+    let dispatch_arms = dispatch_arms(c);
 
     quote! {
         #[doc(hidden)]
@@ -120,4 +95,53 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
             }
         }
     }
+}
+
+/// One `match` arm per operation: read `--json`, call, render.
+///
+/// A listen op prints newline-delimited JSON, one item per line, and its exit code
+/// still comes from the same `CliExit` projection, so a stream that failed and a
+/// value that failed are told apart the same way.
+fn dispatch_arms(c: &Contract) -> Vec<proc_macro2::TokenStream> {
+    c.methods.iter().map(|m| {
+        let name = m.snake.to_string();
+        let id = &m.ident;
+        let call = match &m.input {
+            Some(ty) => quote! {
+                {
+                    let raw = sm.get_one::<String>("json").cloned().unwrap_or_else(|| "null".into());
+                    let input: #ty = ::gabion::serde_json::from_str(&raw).map_err(|e| {
+                        ::gabion::cli::CliExit::new(
+                            ::gabion::error::ErrorKind::InvalidInput,
+                            format!("bad --json: {e}"),
+                        )
+                    })?;
+                    svc.#id(&ctx, input).await
+                }
+            },
+            None => quote! { svc.#id(&ctx, ()).await },
+        };
+        let render = match m.stream {
+            Some(_) => quote! {
+                match #call {
+                    ::core::result::Result::Ok(__stream) => {
+                        ::gabion::cli::render_ndjson(__stream).await
+                    }
+                    ::core::result::Result::Err(e) => {
+                        ::core::result::Result::Err(::gabion::cli::CliExit::from_service(&e))
+                    }
+                }
+            },
+            None => quote! {
+                #call
+                    // One projection for every failure: the exit carries the same
+                    // wire envelope the route sends, so the four surfaces compare.
+                    .map_err(|e| ::gabion::cli::CliExit::from_service(&e))
+                    .and_then(|v| ::gabion::cli::render_json(&v))
+            },
+        };
+        quote! {
+            Some((#name, sm)) => #render,
+        }
+    }).collect()
 }

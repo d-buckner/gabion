@@ -23,8 +23,8 @@ getrandom = "0.3"
 tokio = { workspace = true, features = ["time"] }
 reqwest = { workspace = true }
 tokio-tungstenite = { workspace = true }
-futures-util = "0.3"
-axum = { workspace = true, optional = true }
+futures-util = { workspace = true }
+axum = { workspace = true, optional = true, features = ["ws"] }
 
 [dev-dependencies]
 # test-util: the timer tests run on tokio's paused clock, so they check a

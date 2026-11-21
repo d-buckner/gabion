@@ -22,10 +22,20 @@ opted in); a generated four-adapter conformance suite; `gabion new` /
 rule — including `over-broad-visibility`, `axum-outside-host`,
 `unserved-contract`, `no-wasm-proof` and `--fix`; and CI on GitHub Actions.
 
+## Built since the last rewrite
+
+Streaming surfaces, all six stages of
+[docs/streaming.md](streaming.md): `gabion::stream` with the `Each` and `Latest`
+policy markers; `Caps::Streams`, native over `tokio-tungstenite` and web over
+`web_sys::WebSocket`; `GET /api/ws` with the open-stream registry, the namespace
+wall and the per-namespace `call` queue; NDJSON on stdout for a listen op; MCP
+stdio with one `notifications/progress` per item; and stream cases in the
+generated conformance suite. `checks` carries the pair that proves it: `watch`
+(`Each`), `tail` (`Latest`) and `probe` as the send op on the same socket.
+
 ## Not built
 
-Streaming surfaces (the refusal is built, the shape is decided in
-[docs/streaming.md](streaming.md), and none of the feature is built yet); an HTTP
+An HTTP
 cancellation channel (MCP has one); `gabion host add`; a UI
 gallery; a renderer other than Dioxus.
 
@@ -38,7 +48,9 @@ it mounts it; the conformance suite cannot compare a create, because two calls a
 two creates; the lock's hash follows a signature's named types one level, so a
 nested struct is hashed by name; the UI snapshots cover the view layer, not
 interaction or the async containers; cancellation is offered to a tool, not
-imposed on it.
+imposed on it; a stream's `Each` backpressure reaches the whole connection, because
+there is one write queue per connection, and `POST /mcp` refuses a listen op rather
+than inventing an answer that could carry only the first item.
 
 [GAPS.md](GAPS.md) is the full inspection log, ordered by how much damage each
 silence does. The house rule there: a gap closes when a failing test exists for

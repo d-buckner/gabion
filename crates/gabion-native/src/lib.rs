@@ -30,8 +30,13 @@ pub mod mcp_http;
 /// MCP over stdio. Framing only: the protocol lives in `gabion::mcp`, because
 /// `gabion` must stay wasm-safe and this needs a file descriptor.
 pub mod mcp_stdio;
+/// The stream surface: one WebSocket per host, multiplexed by namespace.
+#[cfg(feature = "server")]
+pub mod ws;
 #[cfg(feature = "server")]
 pub use mcp_http::{boxed_commands, host_router, mcp_router};
+#[cfg(feature = "server")]
+pub use ws::ws_router;
 
 /// OS entropy — the native impl of `Random`.
 #[derive(Clone)]

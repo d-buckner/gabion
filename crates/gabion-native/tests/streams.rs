@@ -67,11 +67,12 @@ async fn serve(script: Vec<Frame>) -> (String, tokio::task::JoinHandle<Vec<Frame
 fn subscribe(streams: &WsStreams, url: &str) -> (Channel, Items<u32, AppError>) {
     let channel = streams.open(HttpRequest::post(url, Vec::new())).unwrap();
     channel
-        .send(Frame::Open {
-            id: StreamId(1),
-            op: OP.into(),
-            input: serde_json::Value::Null,
-        })
+        .send(Frame::open(
+            StreamId(1),
+            OP,
+            serde_json::Value::Null,
+            &gabion::Ctx::anonymous(),
+        ))
         .await_ok();
     let items = Items::new(StreamId(1), "pulse", channel.incoming());
     (channel, items)
@@ -131,11 +132,12 @@ async fn a_frame_stream_round_trips_over_a_real_socket() {
     let read = server.await.unwrap();
     assert_eq!(
         read,
-        vec![Frame::Open {
-            id: StreamId(1),
-            op: OP.into(),
-            input: serde_json::Value::Null,
-        }],
+        vec![Frame::open(
+            StreamId(1),
+            OP,
+            serde_json::Value::Null,
+            &gabion::Ctx::anonymous()
+        )],
         "the server read exactly the open frame"
     );
 }
@@ -196,11 +198,12 @@ async fn closing_a_channel_ends_its_read_side() {
     let streams = WsStreams::new();
     let channel = streams.open(HttpRequest::post(&url, Vec::new())).unwrap();
     channel
-        .send(Frame::Open {
-            id: StreamId(1),
-            op: OP.into(),
-            input: serde_json::Value::Null,
-        })
+        .send(Frame::open(
+            StreamId(1),
+            OP,
+            serde_json::Value::Null,
+            &gabion::Ctx::anonymous(),
+        ))
         .await_ok();
     channel.close();
     // The write queue is gone, so nothing more can be sent on it.

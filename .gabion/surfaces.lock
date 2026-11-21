@@ -1,5 +1,5 @@
 # gabion public surface. Every line is one reachable operation, hashed over
-# its signature and the same-crate types it names.
+# its signature and the definitions it names, in any crate.
 # Reachable over CLI, HTTP, MCP and the typed client. Review changes here like
 # an API change: a changed hash is a changed input or output.
 checks-api::CheckService::add #4e9aa58c775f99e8
@@ -7,6 +7,8 @@ checks-api::CheckService::history #f2ad9e3d51743dcc
 checks-api::CheckService::list #cc326cafef980373
 checks-api::CheckService::probe #fdf74e6576bd71c2
 checks-api::CheckService::sweep #78d13adc372e6a17
+checks-api::CheckService::tail #b665727d0791b89a
+checks-api::CheckService::watch #c235311047d3add1
 incidents-api::IncidentService::evaluate #e29ba7ec0d177f1b
 incidents-api::IncidentService::list #169a5fd3d181c2e8
 incidents-api::IncidentService::uptime #e79771a46779913b

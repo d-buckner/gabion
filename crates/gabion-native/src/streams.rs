@@ -42,7 +42,7 @@ impl Streams for WsStreams {
         })?;
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (in_tx, in_rx) = mpsc::unbounded_channel();
-        handle.spawn(pump(request.url, out_rx, in_tx));
+        handle.spawn(pump(socket_url(&request.url), out_rx, in_tx));
         Ok(Channel::new(WsChannel {
             out: Mutex::new(Some(out_tx)),
             incoming: Mutex::new(Some(in_rx)),
@@ -55,6 +55,19 @@ impl Streams for WsStreams {
 /// The pump never reports a clean end. When the socket goes away it simply stops
 /// feeding the read side, and the codec decides what a missing end means (§7.4) —
 /// an adapter that turned EOF into success is the fail-open that rule bans.
+/// The address to dial. A host configures one HTTP root and gabion builds the
+/// WebSocket address from it, so `http://` becomes `ws://` and `https://`
+/// becomes `wss://`; an address already spelled as a socket is left alone.
+fn socket_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("http://") {
+        return format!("ws://{rest}");
+    }
+    if let Some(rest) = url.strip_prefix("https://") {
+        return format!("wss://{rest}");
+    }
+    url.to_string()
+}
+
 async fn pump(
     url: String,
     mut out_rx: mpsc::UnboundedReceiver<Frame>,
