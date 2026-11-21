@@ -39,21 +39,26 @@ async fn main() {
         .subcommand(incidents_api::__incident_cli::incident_cli_command())
         .get_matches();
 
+    // The dispatch writes as it goes, so a listen op prints while it is still
+    // running rather than all at once at the end.
+    let mut out = gabion::cli::IoWriter(std::io::stdout().lock());
     let outcome = match matches.subcommand() {
         Some(("check", sub)) => {
-            checks_api::__check_cli::check_cli_dispatch(&checks, &ctx, sub).await
+            checks_api::__check_cli::check_cli_dispatch(&checks, &ctx, sub, &mut out).await
         }
         Some(("incident", sub)) => {
-            incidents_api::__incident_cli::incident_cli_dispatch(&incidents, &ctx, sub).await
+            incidents_api::__incident_cli::incident_cli_dispatch(&incidents, &ctx, sub, &mut out)
+                .await
         }
         _ => Err(CliExit::new(
             gabion::prelude::ErrorKind::InvalidInput,
             "choose a `check` or `incident` command",
         )),
     };
+    let _ = std::io::Write::flush(&mut out.0);
 
     match outcome {
-        Ok(text) => println!("{text}"),
+        Ok(()) => {}
         Err(e) => {
             eprintln!("{}", e.message);
             exit(e.code);

@@ -79,9 +79,14 @@ async fn the_generated_cli_carries_the_caller_into_the_impl() {
         ])
         .unwrap();
     let (_, service_matches) = matches.subcommand().unwrap();
-    todo_api::__todo_cli::todo_cli_dispatch(svc.as_ref(), &Ctx::anonymous(), service_matches)
-        .await
-        .unwrap();
+    todo_api::__todo_cli::todo_cli_dispatch(
+        svc.as_ref(),
+        &Ctx::anonymous(),
+        service_matches,
+        &mut String::new(),
+    )
+    .await
+    .unwrap();
 
     let ctx = seen.last();
     assert_eq!(ctx.principal(), Some("agent-7"));

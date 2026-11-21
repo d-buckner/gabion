@@ -51,13 +51,15 @@ fn main() {
         }
     };
 
-    let result: Result<String, gabion::cli::CliExit> = rt.block_on(async {
+    let result: Result<(), gabion::cli::CliExit> = rt.block_on(async {
+        let mut out = gabion::cli::IoWriter(std::io::stdout());
         match matches.subcommand() {
             Some(("ui", _)) => todo_render::render_list(dynsvc.as_ref(), &ctx)
                 .await
-                .map_err(|e| gabion::cli::CliExit::from_service(&e)),
+                .map_err(|e| gabion::cli::CliExit::from_service(&e))
+                .and_then(|text| gabion::cli::write_line(&text, &mut out)),
             Some(("todo", m)) => {
-                todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), &ctx, m).await
+                todo_api::__todo_cli::todo_cli_dispatch(dynsvc.as_ref(), &ctx, m, &mut out).await
             }
             _ => {
                 cmd.print_help().ok();
@@ -67,7 +69,7 @@ fn main() {
     });
 
     match result {
-        Ok(out) => println!("{out}"),
+        Ok(()) => {}
         Err(e) => {
             eprintln!("error: {}", e.message);
             std::process::exit(e.code);
