@@ -13,12 +13,12 @@
 //!   capability reports an empty header list rather than pretending otherwise.
 
 use crate::bridge::bridge;
-use crate::ws::WebStreams;
 use gabion::async_trait;
 use gabion::caps::{
     Caps, Clock, Http, HttpError, HttpRequest, HttpResponse, Random, Sleep, Store, StoreError,
     Timer, Timestamp,
 };
+use gabion_web::WebStreams;
 use js_sys::{ArrayBuffer, Date, Promise, Uint8Array};
 use std::future::Future;
 use wasm_bindgen::{JsCast, JsValue};

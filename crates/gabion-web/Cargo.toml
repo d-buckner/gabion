@@ -1,0 +1,29 @@
+[package]
+name = "gabion-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "Browser capability impls for wasm hosts: the WebSocket stream transport. Host-side only — never imported by *-core."
+keywords = ["wasm", "browser", "websocket", "capabilities", "web-sys"]
+categories = ["asynchronous", "network-programming", "wasm"]
+
+[dependencies]
+gabion = { workspace = true }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+# The WebSocket surface only. A browser clock, localStorage and fetch belong to
+# the host that wants them, not to this crate.
+web-sys = { workspace = true, features = [
+    "BinaryType",
+    "CloseEvent",
+    "ErrorEvent",
+    "EventTarget",
+    "MessageEvent",
+    "WebSocket",
+] }
+
+[lints]
+workspace = true

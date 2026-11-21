@@ -85,8 +85,14 @@ and zero network — determinism preserved.
 crates/gabion-collab/    # pure: sync reactor, room/presence types, wire protocol
 crates/gabion-native/    # + WsTransport (tokio-tungstenite)          [feature "collab"]
                          # + WebRtcTransport (str0m)                  [feature "collab-p2p"]
-crates/gabion-web/       # NEW: browser WS + WebRTC DataChannel impls [feature "collab"]
+crates/gabion-web/       # browser WS: landed as gabion_web::WebStreams, the
+                         # Streams capability over web_sys::WebSocket.
+                         # + WebRTC DataChannel                       [feature "collab"]
 ```
+
+`gabion-web` exists and is published. The WS half above landed as
+`gabion_web::WebStreams`, the `Streams` capability the example's browser host
+uses. The WebRTC DataChannel half is still a plan.
 
 `gabion-collab` deps: `automerge`, `serde`, `gabion`. Nothing else. It compiles
 on wasm32 — that is the wall proof, same as `cargo build -p todo-core --target

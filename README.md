@@ -283,6 +283,7 @@ $ ./example/hosts/host-pulse-web/serve.sh        # the browser board on :3458
 crates/gabion/          runtime: capability traits, Ctx, error model, MCP, registry, test caps
 crates/gabion-macros/   #[service]: cli, server, openapi, mcp, client, registry, conformance
 crates/gabion-native/   native caps, the concurrent MCP stdio pump, the axum host router
+crates/gabion-web/      the browser stream transport: WebStreams over web_sys::WebSocket
 crates/gabion-cli/      gabion check (the gate) + new / feature add / dev
 example/features/       todo/ checks/ incidents/ pulse/ — the colocation unit
 example/shared/         ui-shared: design tokens, the shared panel states, the app's look
