@@ -137,3 +137,103 @@ fn a_changed_input_type_is_a_finding() {
         drift.fix
     );
 }
+
+/// A stream op is an op: it goes on the lock like any other, and a new one is a
+/// finding until someone blesses it.
+#[test]
+fn a_stream_op_missing_from_the_lock_is_a_finding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            (
+                "x-api/src/lib.rs",
+                "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n}\n",
+            ),
+        ],
+    );
+    generate_lock(tmp.path());
+
+    write_ws(
+        tmp.path(),
+        &[(
+            "x-api/src/lib.rs",
+            "#[service]\npub trait XService {\n    async fn a(&self) -> u8;\n    async fn watch(&self, ctx: &Ctx, input: PaneId) -> Result<Latest<Frame>, XErr>;\n}\n",
+        )],
+    );
+    let found = summary(tmp.path());
+    let drift = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "surface-snapshot")
+        .expect("a stream op is a new reachable operation");
+    assert!(
+        drift.detail.contains("x-api::XService::watch"),
+        "{}",
+        drift.detail
+    );
+}
+
+/// The policy is a type and not an attribute, and the lock is why. An attribute
+/// is not part of `f.sig`, so a `#[stream(policy = ...)]` flip would not drift
+/// the lock — and a policy flip decides whether items get dropped.
+#[test]
+fn the_lock_moves_when_a_policy_flips() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let watch = |marker: &str| {
+        format!(
+            "#[service]\npub trait XService {{\n    async fn watch(&self, ctx: &Ctx, input: PaneId) -> Result<{marker}<Frame>, XErr>;\n}}\n"
+        )
+    };
+    write_ws(
+        tmp.path(),
+        &[
+            ("Cargo.toml", &ws_head(&["x-api"])),
+            ("clippy.toml", &honest_clippy_toml()),
+            ("x-api/Cargo.toml", &member("x-api", &[])),
+            ("x-api/src/lib.rs", &watch("Latest")),
+        ],
+    );
+    generate_lock(tmp.path());
+
+    // The counter-case, and the reason for the rule: the same flip spelled as an
+    // attribute leaves the signature alone, so the lock cannot see it.
+    write_ws(
+        tmp.path(),
+        &[(
+            "x-api/src/lib.rs",
+            "#[service]\npub trait XService {\n    #[stream(policy = \"latest\")]\n    async fn watch(&self, ctx: &Ctx, input: PaneId) -> Result<Frame, XErr>;\n}\n",
+        )],
+    );
+    generate_lock(tmp.path());
+    write_ws(
+        tmp.path(),
+        &[(
+            "x-api/src/lib.rs",
+            "#[service]\npub trait XService {\n    #[stream(policy = \"each\")]\n    async fn watch(&self, ctx: &Ctx, input: PaneId) -> Result<Frame, XErr>;\n}\n",
+        )],
+    );
+    assert!(
+        summary(tmp.path())
+            .findings
+            .iter()
+            .all(|f| f.rule != "surface-snapshot"),
+        "an attribute flip must be invisible to the lock; that is the hole the marker closes"
+    );
+
+    write_ws(tmp.path(), &[("x-api/src/lib.rs", &watch("Each"))]);
+    let found = summary(tmp.path());
+    let drift = found
+        .findings
+        .iter()
+        .find(|f| f.rule == "surface-snapshot")
+        .expect("Latest -> Each must drift the lock");
+    assert!(
+        drift.detail.contains("x-api::XService::watch"),
+        "{}",
+        drift.detail
+    );
+}

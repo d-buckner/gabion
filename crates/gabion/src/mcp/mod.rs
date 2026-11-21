@@ -152,7 +152,8 @@ pub trait Service: Send + Sync {
     fn call<'a>(&'a self, ctx: &'a Ctx, name: &'a str, args: Value) -> ToolResult<'a>;
 }
 
-#[cfg(test)]
+// tokio does not build for wasm32, and these tests need a real executor.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(clippy::unwrap_used)] // a failing assertion should show the payload
 mod tests {
     use std::sync::Arc;

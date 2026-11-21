@@ -14,7 +14,7 @@ use todo_api::{Todo, TodoErr, TodoId, TodoService};
 
 struct Stub;
 
-#[gabion::async_trait]
+#[gabion::service_impl]
 impl TodoService for Stub {
     async fn create(
         &self,

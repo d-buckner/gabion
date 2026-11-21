@@ -16,11 +16,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 thiserror = { workspace = true }
+futures-core = { workspace = true }
 gabion-macros = { workspace = true }
 
 # Only for the test harness: the capability tests need an executor to drive the
-# futures they assert on. Nothing in the library depends on a runtime.
-[dev-dependencies]
+# futures they assert on. Nothing in the library depends on a runtime. Native
+# only, because tokio's `net` does not build for wasm32 and the wasm proof builds
+# this crate's tests with `--all-targets`.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true }
 
 [lints]

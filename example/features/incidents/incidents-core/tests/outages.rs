@@ -7,7 +7,7 @@
 use checks_api::{
     check_err, Check, CheckErr, CheckError, CheckId, CheckReport, CheckService, NewCheck, Probe,
 };
-use gabion::prelude::{async_trait, Ctx, ErrorKind};
+use gabion::prelude::{service_impl, Ctx, ErrorKind};
 use gabion::testing::TestCaps;
 use incidents_api::{Incident, IncidentService};
 use incidents_core::IncidentServiceImpl;
@@ -18,7 +18,7 @@ struct Stub {
     history: Vec<Probe>,
 }
 
-#[async_trait]
+#[service_impl]
 impl CheckService for Stub {
     async fn add(&self, _ctx: &Ctx, _input: NewCheck) -> Result<Check, CheckErr> {
         unreachable!("incidents never adds a watch")

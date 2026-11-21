@@ -26,12 +26,14 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 
+mod attrs;
 mod cli;
 mod client;
 mod conformance;
 mod mcp;
 mod registry;
 mod server;
+use attrs::async_trait_attrs;
 use cli::gen_cli;
 use client::gen_client;
 use conformance::gen_conformance;
@@ -86,6 +88,18 @@ pub(crate) struct Contract {
     pub(crate) methods: Vec<Method>,
 }
 
+/// `#[async_trait]` for a hand-written `impl` of a `#[service]` trait.
+///
+/// Write this wherever you would have written `#[async_trait]` above
+/// `impl MyService for MyImpl`. The trait gets the same split from `#[service]`,
+/// and an impl that disagrees is `E0053`.
+#[proc_macro_attribute]
+pub fn service_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as syn::ItemImpl);
+    let attrs = async_trait_attrs();
+    quote! { #(#attrs)* #item }.into()
+}
+
 #[proc_macro_attribute]
 pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Err(e) = reject_service_args(&proc_macro2::TokenStream::from(attr)) {
@@ -125,9 +139,7 @@ fn to_snake(s: &str) -> String {
 
 fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
     let mut cleaned = input.clone();
-    cleaned
-        .attrs
-        .push(syn::parse_quote!(#[::gabion::async_trait]));
+    cleaned.attrs.extend(async_trait_attrs());
     let trait_ident = cleaned.ident.clone();
     let trait_name = trait_ident.to_string();
     let ns_src = trait_name.strip_suffix("Service").unwrap_or(&trait_name);
@@ -206,17 +218,7 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
             ));
         }
 
-        if let Some((output, _)) = result_args(&m.sig.output) {
-            if is_streaming(&output) {
-                return Err(syn::Error::new_spanned(
-                    &output,
-                    "streaming returns are not supported: #[service] builds four surfaces from \
-                     one signature, and none of them carries a stream in v1 (spec §10, still \
-                     open). Return a value, or take the streaming operation out of this trait. \
-                     This is a deliberate compile error rather than surfaces that cannot work.",
-                ));
-            }
-        }
+        reject_stream_return(&m.sig)?;
         let Some((output, Some(error))) = result_args(&m.sig.output) else {
             return Err(syn::Error::new_spanned(
                 &m.sig.output,
@@ -240,20 +242,74 @@ fn collect_methods(cleaned: &mut ItemTrait) -> syn::Result<Vec<Method>> {
     Ok(methods)
 }
 
-/// A return type that would need a stream: `impl Trait` or `Stream`.
+/// A return that needs a stream, refused either way it is spelled.
+///
+/// Split out of `collect_methods` because the two refusals are one decision with
+/// two messages, and the calling convention is already the busiest part of that
+/// function.
+fn reject_stream_return(sig: &syn::Signature) -> syn::Result<()> {
+    let Some((output, _)) = result_args(&sig.output) else {
+        return Ok(());
+    };
+    if is_stream_marker(&output) {
+        return Err(syn::Error::new_spanned(&output, MARKERS_NOT_BUILT));
+    }
+    if is_streaming(&output) {
+        return Err(syn::Error::new_spanned(&output, NO_UNMARKED_STREAM));
+    }
+    Ok(())
+}
+
+/// The message for a return that names a policy marker. The markers are decided
+/// (`docs/streaming.md` §4.3) and the surfaces that would carry them are not,
+/// and the gap has to be a compile error rather than a schemars failure.
+const MARKERS_NOT_BUILT: &str = "`Each<T>` and `Latest<T>` are reserved for streaming and are \
+                                 not built yet: no surface can carry a stream, so a method that \
+                                 returns one has no adapter. Return a value, or read \
+                                 docs/streaming.md section 11 for the stage that lifts this. \
+                                 This is \
+                                 a deliberate compile error rather than surfaces that cannot work.";
+
+/// The message for a stream return that names no policy. The policy is the
+/// marker, so an unmarked stream has no policy to run — and no default exists,
+/// because dropping items and delivering every item are different promises.
+const NO_UNMARKED_STREAM: &str = "streaming returns are not supported: a stream carries its \
+                                  policy in the type, as `Each<T>` (every item) or `Latest<T>` \
+                                  (the newest), and there is no unmarked stream shape to default. \
+                                  #[service] builds four surfaces from one signature, and none of \
+                                  them carries a stream yet (docs/streaming.md). Return a value, \
+                                  or take the streaming operation out of this trait.";
+
+/// A return type that would need a stream but names no policy: `impl Stream`, a
+/// bare `Stream`, or gabion's own `BoxStream`.
 ///
 /// Checked here because every downstream generator assumes a value: the OpenAPI
 /// document asks schemars for a schema, the client parses one body, and the CLI
 /// renders one. A `Stream` in a trait method is also not dyn-compatible, so
 /// without this check the author gets an E0038 from generated code they did not
-/// write.
+/// write. `BoxStream` is spelled as one word, so the token scan needs it by name.
 fn is_streaming(output: &Type) -> bool {
     use quote::ToTokens;
     output
         .to_token_stream()
         .to_string()
         .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|token| token == "impl" || token == "Stream")
+        .any(|token| token == "impl" || token == "Stream" || token == "BoxStream")
+}
+
+/// A return that names one of the two stream policy markers.
+///
+/// The last path segment is what the convention is about, the way [`is_ctx`]
+/// matches `Ctx`: `gabion::stream::Latest<T>` and a re-export of it are the same
+/// declaration, and a wall that depends on how someone imported it is not a wall.
+fn is_stream_marker(output: &Type) -> bool {
+    let Type::Path(p) = output else {
+        return false;
+    };
+    p.path
+        .segments
+        .last()
+        .is_some_and(|seg| seg.ident == "Each" || seg.ident == "Latest")
 }
 
 /// `&Ctx`, `&gabion::Ctx`, `&crate::Ctx`: the type's last segment is what the

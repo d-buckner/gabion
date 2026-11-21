@@ -1,6 +1,8 @@
 //! The capabilities a core needs to wait and to call another service, proven
 //! against the deterministic impls. gabion's own source rules do not scan
 //! `tests/`; the effect ban is lifted here for the one wall-clock assertion.
+//! Needs a real executor, so it is not built for wasm32.
+#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

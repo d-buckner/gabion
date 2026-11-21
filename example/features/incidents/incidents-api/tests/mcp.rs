@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use checks_api::{CheckErr, CheckId, CheckReport, CheckService, NewCheck, Probe};
-use gabion::prelude::{async_trait, Ctx};
+use gabion::prelude::{service_impl, Ctx};
 use incidents_api::{IncidentErr, IncidentService, Uptime};
 
 struct Stub;
 
-#[async_trait]
+#[service_impl]
 impl CheckService for Stub {
     async fn add(&self, _ctx: &Ctx, _input: NewCheck) -> Result<checks_api::Check, CheckErr> {
         unreachable!("incidents never adds a watch")
@@ -30,7 +30,7 @@ impl CheckService for Stub {
     }
 }
 
-#[async_trait]
+#[service_impl]
 impl IncidentService for Stub {
     async fn evaluate(
         &self,

@@ -12,10 +12,12 @@ pub mod error;
 pub mod mcp;
 pub mod openapi;
 pub mod registry;
+pub mod stream;
 pub mod testing;
 
 pub use ctx::Ctx;
 pub use gabion_macros::service;
+pub use gabion_macros::service_impl;
 
 /// Re-exported so app crates don't pin serde/serde_json/schemars themselves.
 pub use async_trait::async_trait;
@@ -32,6 +34,8 @@ pub mod prelude {
     pub use crate::ctx::{Cancel, Ctx};
     pub use crate::error::{ErrorKind, FromWire, ServiceError, WireError};
     pub use crate::service;
+    pub use crate::service_impl;
+    pub use crate::stream::{BoxStream, Each, EndReason, Latest, Stream};
     pub use schemars::JsonSchema;
     pub use serde::{Deserialize, Serialize};
 }

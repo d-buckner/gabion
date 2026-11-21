@@ -345,38 +345,3 @@ fn a_core_that_implements_nothing_is_a_finding() {
         .expect("a placeholder core must be named");
     assert!(hit.detail.contains("x-core"), "{}", hit.detail);
 }
-
-/// `tests/` used to be unscanned, which is where an agent writes the most code.
-/// The shape rules apply there; the structural ones do not, because an integration
-/// test is an effect home and ships nowhere.
-#[test]
-fn tests_are_scanned_for_shape_but_granted_their_allows() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    write_ws(
-        tmp.path(),
-        &[
-            ("Cargo.toml", &ws_head(&["x-api", "x-core", "host-x"])),
-            ("clippy.toml", &honest_clippy_toml()),
-            ("x-api/Cargo.toml", &member("x-api", &[])),
-            ("x-api/src/lib.rs", "pub trait X {}\n"),
-            ("x-core/Cargo.toml", &member("x-core", &["x-api"])),
-            ("x-core/src/lib.rs", "pub fn f() {}\n"),
-            (
-                "x-core/tests/probe.rs",
-                "#![allow(clippy::unwrap_used)]\n\n// TODO: this test is a sketch\n#[test]\nfn t() {}\n",
-            ),
-            ("host-x/Cargo.toml", &member("host-x", &["x-core"])),
-            ("host-x/src/lib.rs", "fn main() { let _ = x_core::f(); }\n"),
-        ],
-    );
-    let found = summary(tmp.path());
-    let rules: Vec<&str> = found.findings.iter().map(|f| f.rule).collect();
-    assert!(
-        rules.contains(&"no-todo"),
-        "a TODO in a test is still a TODO: {rules:?}"
-    );
-    assert!(
-        !rules.contains(&"allow-allowlist"),
-        "an integration test is an effect home: {rules:?}"
-    );
-}

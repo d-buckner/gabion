@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use gabion::prelude::{async_trait, Ctx};
+use gabion::prelude::{service_impl, Ctx};
 use gabion::serde_json::{json, Value};
 use todo_api::{Todo, TodoErr, TodoId, TodoService};
 
@@ -30,7 +30,7 @@ impl Seen {
 
 struct Stub(Seen);
 
-#[async_trait]
+#[service_impl]
 impl TodoService for Stub {
     async fn create(&self, ctx: &Ctx, input: todo_api::CreateTodo) -> Result<Todo, TodoErr> {
         self.0

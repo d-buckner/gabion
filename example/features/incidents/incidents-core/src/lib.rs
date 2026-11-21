@@ -129,7 +129,7 @@ impl<C: Caps, S: CheckService> IncidentServiceImpl<C, S> {
     }
 }
 
-#[async_trait]
+#[service_impl]
 impl<C: Caps, S: CheckService + Sync> IncidentService for IncidentServiceImpl<C, S> {
     async fn evaluate(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Incident>, IncidentErr> {
         let mut changed = Vec::new();

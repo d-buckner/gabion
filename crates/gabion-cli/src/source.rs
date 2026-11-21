@@ -82,11 +82,41 @@ pub(crate) fn span_range(span: proc_macro2::Span) -> (usize, usize) {
 }
 
 /// `#[cfg(test)]` on a module — tests may unwrap and carry notes.
+///
+/// Reads through `all(..)`, `any(..)` and `not(..)`, because a test module that
+/// needs a real executor is written `#[cfg(all(test, not(target_arch =
+/// "wasm32")))]` and is still a test module.
 pub(crate) fn has_cfg_test(attrs: &[Attribute]) -> bool {
     attrs
         .iter()
         .filter(|a| a.path().is_ident("cfg"))
-        .any(|a| nested_paths(a).contains(&"test".to_string()))
+        .any(|a| cfg_predicates(&a.meta).iter().any(|n| n == "test"))
+}
+
+/// Every predicate name in a `cfg(..)` list, including the ones nested in
+/// `all(..)`, `any(..)` and `not(..)`.
+fn cfg_predicates(meta: &Meta) -> Vec<String> {
+    let Meta::List(list) = meta else {
+        return Vec::new();
+    };
+    let Ok(metas) = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for m in &metas {
+        match m {
+            Meta::Path(p) => out.push(
+                p.segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            ),
+            Meta::List(_) => out.extend(cfg_predicates(m)),
+            Meta::NameValue(_) => {}
+        }
+    }
+    out
 }
 
 /// Nested idents of `#[attr(a, b)]`, rendered as `a::b` paths.
