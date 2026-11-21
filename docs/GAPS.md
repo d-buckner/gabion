@@ -229,6 +229,13 @@ config and no way to run it in a browser.
   `todo-core`'s `create` uses it. Proven by `a_write_records_who_made_it`,
   `an_anonymous_write_records_no_writer`, and
   `a_writer_is_recorded_and_survives_a_reopen`.
+- **A CI that could not fail.** gabion carried a Forgejo workflow that never ran:
+  valid YAML, a commit status that sat at *Pending* forever, and no runner
+  registered on the instance, so `fj actions tasks` reported no tasks. A workflow
+  that cannot fail is worse than no workflow, because it reads as a gate — the same
+  fail-open class as §1. The file is deleted. GitHub Actions is the CI, running the
+  same one command on every push and pull request, and the repo has one remote and
+  one forge.
 - **A hand-written HTTP handler.** `axum-outside-host`; see §3 for the limit.
   Proven by `axum_outside_a_host_is_a_finding` (a feature crate is a finding, a
   host crate importing the same path is not, and the framework's own transport is
@@ -341,11 +348,6 @@ config and no way to run it in a browser.
 
 ## 8. Gate's own gaps
 
-- **The Forgejo CI never runs.** `.forgejo/workflows/ci.yml` is valid and the
-  commit status appears on PRs, but it sits at *Pending* indefinitely and
-  `fj actions tasks` reports no tasks — no runner is registered on the instance.
-  GitHub Actions runs the same one command on every push and pull request, and
-  that is what enforces the wall today.
 - **The conformance suite cannot compare a create.** Two calls to `check.add` are
   two watches with two ids, so the cases are the ones a repeat answers the same
   way: observations and failures. A create-shaped success is covered by the client

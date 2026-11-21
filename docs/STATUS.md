@@ -38,8 +38,7 @@ it mounts it; the conformance suite cannot compare a create, because two calls a
 two creates; the lock's hash follows a signature's named types one level, so a
 nested struct is hashed by name; the UI snapshots cover the view layer, not
 interaction or the async containers; cancellation is offered to a tool, not
-imposed on it; and the Forgejo workflow still has no runner, so GitHub Actions is
-what enforces the wall.
+imposed on it.
 
 [GAPS.md](GAPS.md) is the full inspection log, ordered by how much damage each
 silence does. The house rule there: a gap closes when a failing test exists for

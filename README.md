@@ -318,8 +318,8 @@ The house rules, from [the spec](docs/framework-spec.md) and
   crate graph, do that instead of adding a rule for it.
 - **No silent passes.** A skipped step is a named SKIP, never an empty green.
 
-The canonical remote is Forgejo; [GitHub](https://github.com/d-buckner/gabion) is a
-mirror and is where CI currently runs.
+The canonical remote is [GitHub](https://github.com/d-buckner/gabion), and GitHub
+Actions is what enforces the wall.
 
 ## Docs
 
