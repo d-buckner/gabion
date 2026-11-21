@@ -333,6 +333,10 @@ mirror and is where CI currently runs.
 - [docs/STATUS.md](docs/STATUS.md) — what is built, what is not, and the edges of
   every claim.
 - [docs/GAPS.md](docs/GAPS.md) — the full inspection log, ordered by damage.
+- [docs/streaming.md](docs/streaming.md) — the decision on streaming surfaces:
+  the contract, why the policy is a type, why the transport is one
+  feature-namespaced WebSocket, and the stages and tests it lands with. Decided,
+  not built.
 - [docs/local-first-collab.md](docs/local-first-collab.md) — a design proposal for
   optional local-first sync (rooms, presence, CRDT merge). Not implemented.
 

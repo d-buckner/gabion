@@ -23,7 +23,11 @@ call — generated from one definition. All four are built (§5).
   tokens and no styles (`framework-ui` enforces it); Dioxus is what the examples use,
   because it is the only mature native+wasm stack. [OPEN: confirm renderer-agnostic vs
   bundled]
-- No streaming/SSE surfaces in v1 (contract shape reserved for it).
+- Streaming is **decided** (open question 4 below): stream ops land in v1, the
+  policy carried by the return type, duplex as a listen op plus an ordinary send
+  op, served on **one WebSocket per host** whose frames are namespaced by feature.
+  Per-stream flow control over that shared connection is v2, and SSE stays out of
+  v1. [streaming.md](streaming.md) is the decision; none of it is built yet.
 - No mobile targets.
 - Not a web framework replacement: axum/rmcp/clap are used internally, not rebuilt.
 
@@ -382,7 +386,11 @@ silence does):
 1. Renderer: agnostic + Dioxus template (recommended) vs bundled renderer stack.
 2. Wire format: JSON-only v1 vs CBOR option.
 3. Name (needs registry + SERP collision sweep before publishing).
-4. Streaming surfaces: `Stream` return support — v1 or v2?
+4. ~~Streaming surfaces: `Stream` return support — v1 or v2?~~ — **decided: v1**.
+   The policy is a return-type marker rather than a per-method attribute, duplex is
+   a listen op plus an ordinary send op in one namespace, and the transport is one
+   feature-namespaced WebSocket per host. [streaming.md](streaming.md) holds the
+   design, the stages, and the failing tests that have to land with it.
 5. ~~Whether `gabion check` should grow a `--fix`~~ — decided and built: it
    applies the findings that carry an exact text edit (a narrowed `pub`, the
    surface lock) once, and leaves the rest for a human.

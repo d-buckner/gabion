@@ -60,13 +60,21 @@ recorded in §7.
 - **Portable components.** A panel can be composed inside its app; it cannot travel
   to another app, because it uses its app's `*-shared` kit. A headless/themeable kit
   would be a product of its own, and deliberately not this one.
-- **Streaming surfaces** (`Stream` return support) — v1 or v2 is still open in the
-  spec. What exists now is the refusal: a streaming return is a compile error with
-  a reason (§7), rather than four generated surfaces that cannot carry a stream.
+- **Streaming surfaces** (`Stream` return support) — **decided**: v1, the policy in
+  the return type, full duplex, on one feature-namespaced WebSocket per host
+  ([streaming.md](streaming.md)). What exists now is still only the refusal: a
+  streaming return is a compile error with a reason (§7), rather than surfaces that
+  cannot carry a stream. The decision names a hole the refusal does not currently
+  cover: `is_streaming` scans the return type for `impl` and `Stream`, so a
+  `Latest<T>` return walks past it into the value generators (streaming.md §11,
+  stage 0).
 - **`Ctx` cancellation over HTTP.** The MCP half is built
   (`notifications/cancelled`, §7); HTTP has no cancel channel because a dropped
   connection cancels the handler future, and a client that stopped listening learns
-  nothing. A wire-level cancel for HTTP would be a protocol of its own.
+  nothing. A wire-level cancel for HTTP would be a protocol of its own. Streams do
+  not need one: a stream rides a WebSocket, where a dropped socket or a `close`
+  frame ends the producer even while it is idle, and either side can send one
+  (streaming.md §7). A unary call is still the gap.
 - **Scaffolding for a second host.** `gabion new` writes two and `gabion feature
   add`/`remove` manage features; there is no `gabion host add`.
 - **A UI gallery.** Panels have per-component snapshots, but nothing renders them
@@ -365,6 +373,7 @@ config and no way to run it in a browser.
 - Resolving the lock's hash *recursively*: today it follows a signature's named
   types one level, so a field whose type is another struct is hashed by name.
 - An HTTP cancellation channel, if an agent ever needs to stop a route the way it
-  can stop a tool.
+  can stop a tool. Streams do not need one: a stream rides a WebSocket, and a
+  dropped socket or a `close` frame reaches the producer (streaming.md §7).
 - Persisting attribution for stores other than `FileStore`: the capability carries
   the caller, and each impl decides whether to keep it.
