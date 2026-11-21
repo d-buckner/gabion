@@ -31,6 +31,12 @@ web-sys = { workspace = true, features = [
     "Response",
     "Storage",
     "Window",
+    "BinaryType",
+    "CloseEvent",
+    "ErrorEvent",
+    "EventTarget",
+    "MessageEvent",
+    "WebSocket",
 ] }
 console_error_panic_hook = { workspace = true }
 

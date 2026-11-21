@@ -9,7 +9,7 @@
 
 use gabion::caps::{Caps, Timestamp};
 use gabion::prelude::Ctx;
-use gabion::testing::{InMemoryStore, MockClock, MockHttp, MockRandom, MockSleep};
+use gabion::testing::{InMemoryStore, MockClock, MockHttp, MockRandom, MockSleep, MockStreams};
 use std::sync::Arc;
 use todo_api::{TodoClient, TodoService};
 use todo_core::TodoServiceImpl;
@@ -22,6 +22,7 @@ pub struct WasmCaps {
     random: MockRandom,
     sleep: MockSleep,
     http: MockHttp,
+    streams: MockStreams,
 }
 
 impl Caps for WasmCaps {
@@ -30,6 +31,7 @@ impl Caps for WasmCaps {
     type Random = MockRandom;
     type Sleep = MockSleep;
     type Http = MockHttp;
+    type Streams = MockStreams;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -44,6 +46,9 @@ impl Caps for WasmCaps {
     }
     fn http(&self) -> &Self::Http {
         &self.http
+    }
+    fn streams(&self) -> &Self::Streams {
+        &self.streams
     }
 }
 
@@ -67,6 +72,7 @@ fn wasm_caps() -> WasmCaps {
         // app. A js-crypto impl lands with the WebCaps pass.
         random: MockRandom::new(0xA570_A570),
         clock,
+        streams: MockStreams::new(),
     }
 }
 
