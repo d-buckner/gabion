@@ -174,17 +174,20 @@ impl ReadSide {
 }
 
 #[cfg(target_arch = "wasm32")]
+type Handlers = (
+    Closure<dyn FnMut(MessageEvent)>,
+    Closure<dyn FnMut(ErrorEvent)>,
+    Closure<dyn FnMut(CloseEvent)>,
+);
+
+#[cfg(target_arch = "wasm32")]
 struct WsDriver {
     socket: WebSocket,
     read: Rc<ReadSide>,
     /// Set once `close` runs, so a late `onclose` does not overwrite the reason.
     closed: AtomicBool,
     /// Kept alive for the socket's lifetime; the browser calls them.
-    _handlers: (
-        Closure<dyn FnMut(MessageEvent)>,
-        Closure<dyn FnMut(ErrorEvent)>,
-        Closure<dyn FnMut(CloseEvent)>,
-    ),
+    _handlers: Handlers,
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -1991,6 +1991,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gabion-web"
+version = "0.1.1"
+dependencies = [
+ "gabion",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2479,6 +2489,7 @@ dependencies = [
  "console_error_panic_hook",
  "dioxus",
  "gabion",
+ "gabion-web",
  "incidents-api",
  "incidents-core",
  "js-sys",

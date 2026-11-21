@@ -5,6 +5,7 @@ members = [
     "crates/gabion-cli",
     "crates/gabion-macros",
     "crates/gabion-native",
+    "crates/gabion-web",
     "example/features/todo/todo-api",
     "example/features/todo/todo-core",
     "example/features/todo/todo-render",
@@ -28,7 +29,7 @@ version = "0.1.1"
 edition = "2021"
 license = "MIT"
 authors = ["Daniel Buckner"]
-# Inherited by the four published crates. An inherited path is resolved
+# Inherited by the five published crates. An inherited path is resolved
 # relative to the *workspace* manifest, so "README.md" (not "../../README.md")
 # is what lands in each crate. No `homepage`: it would duplicate repository, and
 # cargo warns `redundant_homepage`. Without repository, `cargo package` warns
@@ -40,7 +41,7 @@ readme = "README.md"
 # generates the same block into every app it scaffolds.
 [workspace.metadata.gabion]
 # The gabion runtime itself: never allowed to depend on a feature crate.
-framework-crates = ["gabion", "gabion-macros", "gabion-native", "gabion-cli"]
+framework-crates = ["gabion", "gabion-macros", "gabion-native", "gabion-web", "gabion-cli"]
 # gabion-cli is a dev tool: it spawns processes and reads env by definition,
 # so it is a declared effect home and `gabion check` audits that fact.
 effect-homes = ["gabion-cli"]
@@ -89,6 +90,7 @@ type_complexity = "deny"
 gabion = { path = "crates/gabion", version = "0.1" }
 gabion-macros = { path = "crates/gabion-macros", version = "0.1" }
 gabion-native = { path = "crates/gabion-native", version = "0.1" }
+gabion-web = { path = "crates/gabion-web", version = "0.1" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

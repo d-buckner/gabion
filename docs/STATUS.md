@@ -33,6 +33,10 @@ stdio with one `notifications/progress` per item; and stream cases in the
 generated conformance suite. `checks` carries the pair that proves it: `watch`
 (`Each`), `tail` (`Latest`) and `probe` as the send op on the same socket.
 
+The browser half of that transport now ships in the published `gabion-web`
+crate, so a host outside this repo can take it. The example's web host depends
+on it.
+
 ## Not built
 
 An HTTP

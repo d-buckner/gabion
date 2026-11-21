@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 gabion = { workspace = true }
+gabion-web = { workspace = true }
 checks-api = { path = "../../features/checks/checks-api" }
 incidents-api = { path = "../../features/incidents/incidents-api" }
 checks-core = { path = "../../features/checks/checks-core" }
@@ -31,12 +32,6 @@ web-sys = { workspace = true, features = [
     "Response",
     "Storage",
     "Window",
-    "BinaryType",
-    "CloseEvent",
-    "ErrorEvent",
-    "EventTarget",
-    "MessageEvent",
-    "WebSocket",
 ] }
 console_error_panic_hook = { workspace = true }
 
