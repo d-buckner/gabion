@@ -56,9 +56,10 @@ fn a_success_value_that_will_not_serialize_fails_the_call() {
                 &Probe,
                 &Ctx::anonymous(),
                 &matches,
+                &mut String::new(),
             ));
     match outcome {
-        Ok(text) => panic!("a value that cannot serialize must not look like success: {text:?}"),
+        Ok(()) => panic!("a value that cannot serialize must not look like success"),
         Err(e) => {
             assert_eq!(e.code, gabion::error::ErrorKind::Internal.exit_code());
             assert!(

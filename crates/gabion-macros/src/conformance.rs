@@ -182,8 +182,11 @@ fn plain_cli(
             {
                 ::core::result::Result::Ok(m) => match m.subcommand() {
                     ::core::option::Option::Some((_, service)) => {
-                        match #cli_mod::#dispatch_fn(svc.as_ref(), &ctx, service).await {
-                            ::core::result::Result::Ok(text) => {
+                        let mut text = String::new();
+                        match #cli_mod::#dispatch_fn(svc.as_ref(), &ctx, service, &mut text)
+                            .await
+                        {
+                            ::core::result::Result::Ok(()) => {
                                 ::gabion::conformance::text_value(&text)
                             }
                             ::core::result::Result::Err(exit) => {
@@ -276,8 +279,11 @@ fn stream_cli(
             {
                 ::core::result::Result::Ok(m) => match m.subcommand() {
                     ::core::option::Option::Some((_, service)) => {
-                        match #cli_mod::#dispatch_fn(svc.as_ref(), &ctx, service).await {
-                            ::core::result::Result::Ok(text) => {
+                        let mut text = String::new();
+                        match #cli_mod::#dispatch_fn(svc.as_ref(), &ctx, service, &mut text)
+                            .await
+                        {
+                            ::core::result::Result::Ok(()) => {
                                 ::gabion::conformance::ndjson_value(&text)
                             }
                             ::core::result::Result::Err(exit) => {

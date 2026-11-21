@@ -147,10 +147,12 @@ fn main() {
     let result = rt.block_on(async {
         match matches.subcommand() {
             Some(("%FEATURE%", m)) => {
+                let mut out = gabion::cli::IoWriter(std::io::stdout());
                 %NAME%_%FEATURE%_api::__%FEATURE%_cli::%FEATURE%_cli_dispatch(
                     svc.as_ref(),
                     &ctx,
                     m,
+                    &mut out,
                 )
                 .await
             }

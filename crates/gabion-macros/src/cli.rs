@@ -65,16 +65,22 @@ pub(crate) fn gen_cli(c: &Contract) -> proc_macro2::TokenStream {
                     .subcommands([#(#subcommands),*])
             }
 
-            /// Dispatch a matched subcommand against the service.
+            /// Dispatch a matched subcommand against the service, writing its
+            /// output to `out`.
             ///
             /// `base` is the context the host built (usually anonymous); the
             /// service's own `--principal` / `--tenant` / `--trace` flags narrow
             /// it, so a caller that names itself is not silently anonymous.
+            ///
+            /// The host supplies the writer, because a library does not choose a
+            /// process's stdout and a listen op must be able to print while it is
+            /// still running. A host passes stdout; a test passes a `String`.
             pub async fn #cli_dispatch_fn(
                 svc: &(dyn #trait_ident + Send + Sync),
                 base: &::gabion::ctx::Ctx,
                 m: &::clap::ArgMatches,
-            ) -> ::core::result::Result<String, ::gabion::cli::CliExit> {
+                out: &mut dyn ::core::fmt::Write,
+            ) -> ::core::result::Result<(), ::gabion::cli::CliExit> {
                 let mut ctx = base.clone();
                 if let Some(v) = m.get_one::<String>("principal") {
                     ctx = ctx.with_principal(v.clone());
@@ -125,7 +131,7 @@ fn dispatch_arms(c: &Contract) -> Vec<proc_macro2::TokenStream> {
             Some(_) => quote! {
                 match #call {
                     ::core::result::Result::Ok(__stream) => {
-                        ::gabion::cli::render_ndjson(__stream).await
+                        ::gabion::cli::render_ndjson(__stream, out).await
                     }
                     ::core::result::Result::Err(e) => {
                         ::core::result::Result::Err(::gabion::cli::CliExit::from_service(&e))
@@ -137,7 +143,7 @@ fn dispatch_arms(c: &Contract) -> Vec<proc_macro2::TokenStream> {
                     // One projection for every failure: the exit carries the same
                     // wire envelope the route sends, so the four surfaces compare.
                     .map_err(|e| ::gabion::cli::CliExit::from_service(&e))
-                    .and_then(|v| ::gabion::cli::render_json(&v))
+                    .and_then(|v| ::gabion::cli::render_json_to(&v, out))
             },
         };
         quote! {
