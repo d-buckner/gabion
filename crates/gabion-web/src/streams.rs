@@ -105,11 +105,32 @@ impl Streams for WebStreams {
             }) as Box<dyn FnMut(CloseEvent)>)
         };
         socket.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+        // A browser throws on `send` until the socket finishes connecting, and
+        // gabion writes a channel's first frame the moment the channel opens.
+        // Frames written before `open` wait here and go out on the `open` event.
+        let pending: Rc<RefCell<VecDeque<String>>> = Rc::new(RefCell::new(VecDeque::new()));
+        let on_open = {
+            let read = Rc::clone(&read);
+            let pending = Rc::clone(&pending);
+            let socket = socket.clone();
+            Closure::wrap(Box::new(move || {
+                while let Some(text) = pending.borrow_mut().pop_front() {
+                    if socket.send_with_str(&text).is_err() {
+                        read.fail(StreamError::Transport(
+                            "the socket refused a frame queued before it opened".into(),
+                        ));
+                        break;
+                    }
+                }
+            }) as Box<dyn FnMut()>)
+        };
+        socket.set_onopen(Some(on_open.as_ref().unchecked_ref()));
         Ok(Channel::new(WsDriver {
             socket,
             read,
+            pending,
             closed: AtomicBool::new(false),
-            _handlers: (on_message, on_error, on_close),
+            _handlers: (on_message, on_error, on_close, on_open),
         }))
     }
 }
@@ -178,12 +199,15 @@ type Handlers = (
     Closure<dyn FnMut(MessageEvent)>,
     Closure<dyn FnMut(ErrorEvent)>,
     Closure<dyn FnMut(CloseEvent)>,
+    Closure<dyn FnMut()>,
 );
 
 #[cfg(target_arch = "wasm32")]
 struct WsDriver {
     socket: WebSocket,
     read: Rc<ReadSide>,
+    /// Frames written while the socket was still connecting, in order.
+    pending: Rc<RefCell<VecDeque<String>>>,
     /// Set once `close` runs, so a late `onclose` does not overwrite the reason.
     closed: AtomicBool,
     /// Kept alive for the socket's lifetime; the browser calls them.
@@ -193,15 +217,9 @@ struct WsDriver {
 #[cfg(target_arch = "wasm32")]
 impl ChannelDriver for WsDriver {
     fn send(&self, frame: Frame) -> SendFrame<'_> {
-        // A socket that is closing or closed throws on send, so the browser
-        // answers that question instead of gabion guessing it from a state enum.
         let outcome = gabion::serde_json::to_string(&frame)
             .map_err(|e| StreamError::Protocol(format!("frame would not serialize: {e}")))
-            .and_then(|text| {
-                self.socket.send_with_str(&text).map_err(|_| {
-                    StreamError::Transport("the socket would not take the frame".into())
-                })
-            });
+            .and_then(|text| self.write(text));
         Box::pin(async { outcome })
     }
 
@@ -216,7 +234,30 @@ impl ChannelDriver for WsDriver {
         // A socket still connecting throws on close. There is nothing to recover:
         // the caller asked for the channel to stop, and it stops either way.
         let _ = self.socket.close();
+        self.pending.borrow_mut().clear();
         self.read.finish();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WsDriver {
+    /// Send one frame now, or hold it until the socket opens. A socket that is
+    /// closing or closed throws on send, so the browser answers that question
+    /// instead of gabion guessing it from a state enum.
+    fn write(&self, text: String) -> Result<(), StreamError> {
+        match self.socket.ready_state() {
+            WebSocket::CONNECTING => {
+                self.pending.borrow_mut().push_back(text);
+                Ok(())
+            }
+            WebSocket::OPEN => self
+                .socket
+                .send_with_str(&text)
+                .map_err(|_| StreamError::Transport("the socket would not take the frame".into())),
+            state => Err(StreamError::Transport(format!(
+                "the socket is not open (ready state {state})"
+            ))),
+        }
     }
 }
 
