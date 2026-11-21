@@ -4,11 +4,13 @@
 //! It is imported by every *-api and *-core crate in a gabion app.
 
 pub mod caps;
+pub mod channel;
 pub mod cli;
 pub mod client;
 pub mod conformance;
 pub mod ctx;
 pub mod error;
+pub mod frames;
 pub mod mcp;
 pub mod openapi;
 pub mod registry;
@@ -28,11 +30,12 @@ pub use serde_json;
 pub mod prelude {
     pub use crate::async_trait;
     pub use crate::caps::{
-        timeout, Caps, Clock, Http, HttpError, HttpMethod, HttpRequest, HttpResponse, Random,
-        Sleep, Store, TimedOut, Timer,
+        timeout, Caps, Channel, Clock, Http, HttpError, HttpMethod, HttpRequest, HttpResponse,
+        Random, Sleep, Store, StreamError, Streams, TimedOut, Timer,
     };
     pub use crate::ctx::{Cancel, Ctx};
     pub use crate::error::{ErrorKind, FromWire, ServiceError, WireError};
+    pub use crate::frames::{Frame, StreamId};
     pub use crate::service;
     pub use crate::service_impl;
     pub use crate::stream::{BoxStream, Each, EndReason, Latest, Stream};

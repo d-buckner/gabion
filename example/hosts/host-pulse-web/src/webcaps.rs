@@ -13,6 +13,7 @@
 //!   capability reports an empty header list rather than pretending otherwise.
 
 use crate::bridge::bridge;
+use crate::ws::WebStreams;
 use gabion::async_trait;
 use gabion::caps::{
     Caps, Clock, Http, HttpError, HttpRequest, HttpResponse, Random, Sleep, Store, StoreError,
@@ -229,6 +230,7 @@ pub struct WebCaps {
     random: WebRandom,
     sleep: WebSleep,
     http: FetchHttp,
+    streams: WebStreams,
 }
 
 impl WebCaps {
@@ -244,6 +246,7 @@ impl Caps for WebCaps {
     type Random = WebRandom;
     type Sleep = WebSleep;
     type Http = FetchHttp;
+    type Streams = WebStreams;
 
     fn clock(&self) -> &Self::Clock {
         &self.clock
@@ -259,5 +262,8 @@ impl Caps for WebCaps {
     }
     fn http(&self) -> &Self::Http {
         &self.http
+    }
+    fn streams(&self) -> &Self::Streams {
+        &self.streams
     }
 }

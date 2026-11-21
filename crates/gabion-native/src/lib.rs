@@ -20,6 +20,9 @@ use std::time::Duration;
 
 pub mod filestore;
 pub use filestore::FileStore;
+/// The stream transport: one WebSocket per host, written as frames.
+pub mod streams;
+pub use streams::WsStreams;
 
 /// MCP over HTTP. Feature `server`, because it needs axum.
 #[cfg(feature = "server")]
@@ -149,6 +152,7 @@ pub struct NativeCaps {
     random: SystemRandom,
     sleep: TokioSleep,
     http: ReqwestHttp,
+    streams: WsStreams,
 }
 
 impl NativeCaps {
@@ -160,6 +164,7 @@ impl NativeCaps {
             random: SystemRandom,
             sleep: TokioSleep,
             http: ReqwestHttp::new(),
+            streams: WsStreams::new(),
         }
     }
 }
@@ -176,6 +181,7 @@ impl Caps for NativeCaps {
     type Random = SystemRandom;
     type Sleep = TokioSleep;
     type Http = ReqwestHttp;
+    type Streams = WsStreams;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -190,6 +196,9 @@ impl Caps for NativeCaps {
     }
     fn http(&self) -> &Self::Http {
         &self.http
+    }
+    fn streams(&self) -> &Self::Streams {
+        &self.streams
     }
 }
 
@@ -201,6 +210,7 @@ pub struct FileCaps {
     random: SystemRandom,
     sleep: TokioSleep,
     http: ReqwestHttp,
+    streams: WsStreams,
 }
 
 impl FileCaps {
@@ -211,6 +221,7 @@ impl FileCaps {
             random: SystemRandom,
             sleep: TokioSleep,
             http: ReqwestHttp::new(),
+            streams: WsStreams::new(),
         })
     }
 }
@@ -221,6 +232,7 @@ impl Caps for FileCaps {
     type Random = SystemRandom;
     type Sleep = TokioSleep;
     type Http = ReqwestHttp;
+    type Streams = WsStreams;
     fn clock(&self) -> &Self::Clock {
         &self.clock
     }
@@ -235,6 +247,9 @@ impl Caps for FileCaps {
     }
     fn http(&self) -> &Self::Http {
         &self.http
+    }
+    fn streams(&self) -> &Self::Streams {
+        &self.streams
     }
 }
 

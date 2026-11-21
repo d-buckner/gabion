@@ -6,6 +6,9 @@
 //! store; wasm: fetch, IndexedDB, js Date).
 
 use crate::async_trait;
+// Re-exported so a core names every capability verb from one module.
+pub use crate::channel::Channel;
+pub use crate::frames::StreamError;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
@@ -228,6 +231,22 @@ pub trait Http: Clone + Send + Sync + 'static {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError>;
 }
 
+/// The ability to open a full-duplex channel and stream over it.
+///
+/// `Http` cannot carry a stream: [`HttpResponse`] is a whole body in memory, and
+/// the generated client has to implement the whole service trait, so a stream op
+/// needs a verb of its own (`docs/streaming.md` §6). The channel is one WebSocket;
+/// which op it carries is in the [`Frame`](crate::frames::Frame)s written to it,
+/// not in the URL.
+pub trait Streams: Clone + Send + Sync + 'static {
+    /// Open the channel `request` names and hand back both directions.
+    ///
+    /// `request.url` is the endpoint — `ws://host/api/ws` on native, the same
+    /// address the HTTP calls go to. Opening is not the same as streaming: no
+    /// stream exists until an `open` frame is written on the channel.
+    fn open(&self, request: HttpRequest) -> Result<Channel, StreamError>;
+}
+
 /// Bundle of capabilities a host injects into service impls.
 /// Apps extend this pattern with their own associated types per feature.
 pub trait Caps: Clone + Send + Sync + 'static {
@@ -236,9 +255,11 @@ pub trait Caps: Clone + Send + Sync + 'static {
     type Random: Random;
     type Sleep: Sleep;
     type Http: Http;
+    type Streams: Streams;
     fn clock(&self) -> &Self::Clock;
     fn store(&self) -> &Self::Store;
     fn random(&self) -> &Self::Random;
     fn sleep(&self) -> &Self::Sleep;
     fn http(&self) -> &Self::Http;
+    fn streams(&self) -> &Self::Streams;
 }

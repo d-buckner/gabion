@@ -21,8 +21,10 @@ use wasm_bindgen::prelude::*;
 
 mod bridge;
 mod webcaps;
+mod ws;
 
 pub use webcaps::WebCaps;
+pub use ws::WebStreams;
 
 /// What the demo board starts with on a fresh origin: one CORS-friendly watch
 /// that answers, and one port nobody listens on, so the first sweep produces an

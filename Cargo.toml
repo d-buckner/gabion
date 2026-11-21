@@ -96,10 +96,12 @@ schemars = "1.2"
 thiserror = "2"
 axum = "0.8"
 # `time` is not optional: gabion-native's `Sleep` capability is tokio::time.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 # rustls only, so the native http capability keeps the single-binary promise:
 # no system openssl, no system ca-certificate path to configure.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# The native stream transport: one WebSocket per host (docs/streaming.md §5).
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 clap = "4"
 dioxus = { version = "0.7", default-features = false }
 wasm-bindgen = "0.2"

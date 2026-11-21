@@ -22,6 +22,8 @@ serde_json = { workspace = true }
 getrandom = "0.3"
 tokio = { workspace = true, features = ["time"] }
 reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
 axum = { workspace = true, optional = true }
 
 [dev-dependencies]
