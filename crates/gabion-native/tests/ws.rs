@@ -235,6 +235,42 @@ async fn a_close_is_handled_while_a_send_is_in_flight() {
     assert_eq!(reason, EndReason::Cancelled);
 }
 
+/// A `close` must reach a stream whose op is still accepting.
+///
+/// A listen op's entry point is where a real producer reads its store, lists its
+/// targets and subscribes upstream, and none of that is instant. An `open` awaited
+/// in the read loop holds the connection's only reader for that whole time, so the
+/// `close` that would cancel it sits unread behind it — the one producer the
+/// out-of-band rule exists for is the one that cannot be stopped. The gate here is
+/// never opened, so the start can only return because its cancel token fired.
+#[tokio::test]
+async fn a_close_reaches_an_open_that_is_still_starting() {
+    let alpha = Arc::new(Feature::gated("alpha"));
+    let (base, alpha, _) = serve_with(alpha, Arc::new(Feature::new("beta", 2))).await;
+    let conn = client(&base);
+    let rx = conn
+        .open("alpha.watch", Value::Null, &Ctx::anonymous())
+        .await
+        .unwrap();
+    let id = rx.id();
+    // One reader per stream, and the one that matters is the one inside `close`.
+    drop(rx);
+    let reason = tokio::time::timeout(Duration::from_secs(2), conn.close(id))
+        .await
+        .expect("the close must be answered while the open is still starting")
+        .expect("a close the server honoured is an end, not a refusal");
+    assert_eq!(reason, EndReason::Cancelled);
+    assert_eq!(
+        alpha.released_by_cancel.load(Ordering::SeqCst),
+        1,
+        "the cancel must reach the start while it is still parked, not after it returns"
+    );
+    assert!(
+        alpha.stopped.load(Ordering::SeqCst) > 0,
+        "the producer behind the start must be gone"
+    );
+}
+
 #[tokio::test]
 async fn a_close_frame_ends_one_stream_and_leaves_the_others_up() {
     let alpha = Arc::new(Feature::open_ended("alpha", Duration::from_millis(20)));

@@ -219,6 +219,16 @@ pump could not read the cancellation until the call it meant to stop had finishe
 here. Data in order, control out of order — one queue per namespace, one immediate
 branch for `close`.
 
+`open` belongs on the control side of that split. A listen op's entry point is not
+instant — it reads the store, lists the targets, subscribes upstream — so the
+server claims the stream's id and registers its cancel token *before* calling the
+op, and runs the op in a task of its own. A `close` that arrives while the producer
+is still accepting therefore finds the stream in the registry and cancels it, which
+is the case the out-of-band rule exists for. The read loop never waits on the write
+queue either: a refusal goes into the queue when it has room and into a task of its
+own when a stalled writer has filled it, so a dead subscriber cannot keep the reader
+from the `close` that ends the stream behind it.
+
 **The namespace rule is a wall, not a convention**, and it is enforced at both
 ends. On the server: a frame may only address an op in the namespace of a stream
 that is **live** on this connection — the record leaves the registry when the pump
@@ -474,6 +484,7 @@ The proposal's list, corrected. Style: fixtures in
 | `a_client_may_not_close_a_stream_it_did_not_open` | The other half of the same wall. |
 | `two_sends_keep_their_order_on_one_connection` | The per-namespace ordering rule (§5) — a terminal cannot have its keystrokes overtake each other. |
 | `a_close_is_handled_while_a_send_is_in_flight` | Control out of band, data in order. The bug gabion's MCP pump had to be rebuilt to avoid (GAPS §7). |
+| `a_close_reaches_an_open_that_is_still_starting` | The same rule for `open`: a `close` cancels a producer whose entry point has not returned yet. |
 | `a_close_frame_ends_one_stream_and_leaves_the_others_up` | S6, and S3: one connection, many streams, independent endings. |
 | `a_dropped_socket_ends_the_producer_even_while_it_is_idle` | S13. The read side notices, so an idle producer is cancelled too — the case a streaming HTTP response could not cover. |
 | `a_core_that_streams_still_fails_the_effect_ban` | S12. Cheap, and belongs in stage 0. |

@@ -174,9 +174,31 @@ pub(super) async fn end(id: StreamId, reason: EndReason, out: &mpsc::Sender<Fram
 /// names the outcome. One default for every refusal reported a permission problem
 /// when a frame simply did not parse, which is the cross-surface drift the shared
 /// error model exists to prevent (`docs/streaming.md` §5).
-pub(super) async fn fail(out: &mpsc::Sender<Frame>, id: StreamId, kind: ErrorKind, message: &str) {
+///
+/// Non-blocking, because every caller is the read loop: it is also the one place a
+/// `close` is handled, so a refusal that waited for room behind a stalled writer
+/// would keep the reader from the `close` that would end the stream behind it.
+pub(super) fn fail(out: &mpsc::Sender<Frame>, id: StreamId, kind: ErrorKind, message: &str) {
     let error = WireError::new(kind, message);
-    let _ = out.send(Frame::Error { id, error }).await;
+    refuse(out, Frame::Error { id, error });
+}
+
+/// Hand one frame to the write queue without waiting for it.
+///
+/// Taking a turn in the queue when it has room keeps refusals in the order they
+/// were decided. Only a full queue — 64 frames nobody is writing — hands the send
+/// to a task of its own, which keeps a stalled writer's problem on that task
+/// instead of on the connection's reader.
+pub(super) fn refuse(out: &mpsc::Sender<Frame>, frame: Frame) {
+    match out.try_send(frame) {
+        Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+        Err(mpsc::error::TrySendError::Full(frame)) => {
+            let out = out.clone();
+            tokio::spawn(async move {
+                let _ = out.send(frame).await;
+            });
+        }
+    }
 }
 
 /// The one answer to "no op named `op`", whoever asked.
@@ -202,6 +224,36 @@ mod tests {
         Opened {
             policy,
             items: Box::pin(futures_util::stream::iter(items)),
+        }
+    }
+
+    /// A refusal must neither wait for room in the write queue nor be dropped when
+    /// there is none. The reader that decides it is the reader that has to reach the
+    /// next `close`, so a full queue is the writer's problem and not the reader's —
+    /// but the refusal is still an answer someone is waiting on.
+    #[tokio::test]
+    async fn a_refusal_survives_a_full_write_queue_without_being_awaited() {
+        let (out, mut queue) = mpsc::channel(1);
+        out.try_send(item(StreamId(1), "alpha", json!(0)))
+            .expect("room for one frame");
+        // Nothing drains the queue: returning from here is the first half of the
+        // assertion, because a refusal that awaited a send would never return.
+        fail(
+            &out,
+            StreamId(2),
+            ErrorKind::InvalidInput,
+            "no room but not lost",
+        );
+        match queue.recv().await {
+            Some(Frame::Item { id, .. }) => assert_eq!(id, StreamId(1)),
+            other => panic!("the queue's first frame was lost: {other:?}"),
+        }
+        match queue.recv().await {
+            Some(Frame::Error { id, error }) => {
+                assert_eq!(id, StreamId(2));
+                assert_eq!(error.kind, ErrorKind::InvalidInput, "got: {error:?}");
+            }
+            other => panic!("the refusal was dropped: {other:?}"),
         }
     }
 
