@@ -4,10 +4,13 @@
 //! The two loops are the whole difference between `Each` and `Latest`, so they are
 //! written next to each other and nowhere else. A host that wanted a third policy
 //! would add a third loop here, not a knob at startup.
+//!
+//! The refusals a frame handler sends live here too, because the `ErrorKind` in one
+//! is part of the protocol a reader has to understand.
 
 use futures_util::StreamExt as _;
 use gabion::ctx::Cancel;
-use gabion::error::WireError;
+use gabion::error::{ErrorKind, WireError};
 use gabion::frames::{Frame, StreamId};
 use gabion::stream::{BoxStream, EndReason};
 use gabion::ws::Opened;
@@ -135,7 +138,25 @@ pub(super) async fn end(id: StreamId, reason: EndReason, out: &mpsc::Sender<Fram
     let _ = out.send(Frame::End { id, reason }).await;
 }
 
-pub(super) async fn fail(out: &mpsc::Sender<Frame>, id: StreamId, message: &str) {
-    let error = WireError::new(gabion::error::ErrorKind::Forbidden, message);
+/// Refuse one frame with the kind its caller knows.
+///
+/// The kind is an argument, not a constant: the site that knows what went wrong
+/// names the outcome. One default for every refusal reported a permission problem
+/// when a frame simply did not parse, which is the cross-surface drift the shared
+/// error model exists to prevent (`docs/streaming.md` §5).
+pub(super) async fn fail(out: &mpsc::Sender<Frame>, id: StreamId, kind: ErrorKind, message: &str) {
+    let error = WireError::new(kind, message);
     let _ = out.send(Frame::Error { id, error }).await;
+}
+
+/// The one answer to "no op named `op`", whoever asked.
+///
+/// An unknown op is `NotFound` on every surface, but `open` resolves it against the
+/// mounted services and `call` writes the frame from the namespace queue. Building
+/// it in one place is what keeps those two spellings the same answer.
+pub(super) fn no_such_op(id: StreamId, op: &str) -> Frame {
+    Frame::Error {
+        id,
+        error: WireError::new(ErrorKind::NotFound, format!("no op named `{op}`")),
+    }
 }

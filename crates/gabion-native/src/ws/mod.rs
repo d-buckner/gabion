@@ -10,6 +10,9 @@
 //! - **Namespace wall (§5).** A `call` or `close` may only reach a stream this
 //!   connection already opened, and an op must belong to that stream's namespace.
 //!   One comparison against the open-stream registry, at the one place that has it.
+//! - **A refusal names its kind (§5).** The site that knows what went wrong
+//!   picks the `ErrorKind`, so an unknown op is `NotFound` here as it is over HTTP,
+//!   MCP and the CLI, and only a namespace nobody opened is `Forbidden`.
 //! - **Ordering (§7.1).** `call` frames for one namespace dispatch in arrival
 //!   order. Different namespaces run concurrently, so one slow op cannot hold up
 //!   another feature — that is the bug the MCP stdio pump was rebuilt to avoid.
@@ -27,10 +30,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use futures_util::{SinkExt, StreamExt};
 use gabion::ctx::{Cancel, Ctx};
+use gabion::error::ErrorKind;
 use gabion::frames::{Frame, StreamId};
 use gabion::ws::WsService;
 
-use pump::{fail, pump};
+use pump::{fail, no_such_op, pump};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -113,7 +117,13 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
                         // `StreamId(0)` is the no-stream id: the id the client would
                         // have named is exactly what failed to parse, and `0` is the
                         // one number a client never opens a stream under.
-                        fail(&out, StreamId(0), &format!("frame would not parse: {e}")).await;
+                        fail(
+                            &out,
+                            StreamId(0),
+                            ErrorKind::InvalidInput,
+                            &format!("frame would not parse: {e}"),
+                        )
+                        .await;
                         break;
                     }
                 };
@@ -207,6 +217,7 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
                     fail(
                         out,
                         id,
+                        ErrorKind::NotFound,
                         &format!("stream {id} was not opened on this connection"),
                     )
                     .await;
@@ -218,6 +229,7 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
             fail(
                 out,
                 other.id(),
+                ErrorKind::InvalidInput,
                 &format!("{other:?} is not a frame a client sends"),
             )
             .await;
@@ -266,13 +278,7 @@ async fn drain_calls(
                 Ok(ok) => Frame::Reply { id: call.id, ok },
                 Err(error) => Frame::Error { id: call.id, error },
             },
-            None => Frame::Error {
-                id: call.id,
-                error: gabion::error::WireError::new(
-                    gabion::error::ErrorKind::NotFound,
-                    format!("no op named `{}`", call.op),
-                ),
-            },
+            None => no_such_op(call.id, &call.op),
         };
         if out.send(frame).await.is_err() {
             return;
@@ -303,7 +309,7 @@ async fn open(request: OpenRequest<'_>) {
         out,
     } = *conn;
     let Some(service) = surface.find(&op) else {
-        fail(out, id, &format!("no op named `{op}`")).await;
+        let _ = out.send(no_such_op(id, &op)).await;
         return;
     };
     let ns = service.ns().to_string();
@@ -362,7 +368,10 @@ async fn cancel_all(registry: &Arc<Mutex<Registry>>) {
 async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     let Conn { registry, out, .. } = *conn;
     let Some(ns) = Frame::op_namespace(&op) else {
-        fail(out, id, &format!("`{op}` is not a namespaced op")).await;
+        // A name with no namespace cannot address any stream, which the client's own
+        // check calls `InvalidInput`; the server must not answer it differently.
+        let why = format!("`{op}` is not a namespaced op");
+        fail(out, id, ErrorKind::InvalidInput, &why).await;
         return;
     };
     let ns = ns.to_string();
@@ -380,6 +389,7 @@ async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<
             fail(
                 out,
                 id,
+                ErrorKind::Forbidden,
                 &format!("`{op}` is outside every namespace this connection opened"),
             )
             .await;

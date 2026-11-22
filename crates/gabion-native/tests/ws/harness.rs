@@ -248,6 +248,15 @@ pub async fn send_raw(socket: &mut Raw, frame: Frame) {
         .expect("the write lands");
 }
 
+/// A text body the client wrote itself, for the frame `Frame` cannot spell:
+/// something that will not parse at all.
+pub async fn send_text(socket: &mut Raw, text: &str) {
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .await
+        .expect("the write lands");
+}
+
 /// One text frame off the raw socket, skipped past the frames that are not gabion
 /// framing. A socket that ends first is a panic: every test here is waiting on a
 /// frame the server promised.

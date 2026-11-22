@@ -230,11 +230,25 @@ features on one page therefore cannot read each other's events or write into eac
 other's channel, and the check is one comparison in one place — the registry of
 open streams — not a policy each app configures.
 
-> The gap this exposes: `ErrorKind` has four kinds and none of them is `Forbidden`.
-> A namespace violation must not be reported as `Internal`. A fifth kind is a
-> small, separate decision — it has to round-trip both ways through `WireError` and
-> `FromWire`, and pick an HTTP status, a JSON-RPC code and an exit code — and it
-> belongs with this work, not after it.
+**Every refusal names its kind.** A frame the server cannot honour is answered with
+an `error` frame whose `ErrorKind` says what happened, because a client that
+retries on one kind and alerts on another cannot recover from a wrong answer. The
+surface sends exactly these:
+
+| Situation | Kind |
+| --- | --- |
+| A frame that will not parse | `InvalidInput` |
+| An op no mounted feature serves, on `open` or on `call` | `NotFound` |
+| A `call` outside every namespace this connection opened | `Forbidden` |
+| A `close` for a `StreamId` this connection never opened | `NotFound` |
+| A frame only the server may send (`item`, `reply`, `end`, `error`) | `InvalidInput` |
+| A second `open` under an id already live | `Conflict` |
+
+The middle pair is the one worth keeping apart. An unknown op is `NotFound` on
+every surface — HTTP, MCP, the CLI and here — and only a namespace the connection
+never opened is `Forbidden`, the one kind that means "known caller, not allowed".
+One kind in `pump::fail`'s signature, chosen by the site that knows what went
+wrong, is what keeps those two from collapsing into one answer.
 
 **Flow control, honestly.** One connection has one TCP write queue, so an `Each<T>`
 stream whose subscriber is slow blocks the connection and everything else on it
@@ -339,13 +353,11 @@ The proposal's six, corrected and extended:
    connection that backpressure reaches the connection, which is §5's honest limit,
    not a bug to fix quietly. A deadline on a stream that cannot progress is the
    app's, applied with `caps::timeout` (built today) or `Ctx` cancellation; gabion
-   adds no deadline knob of its own. Two `ErrorKind` gaps surface here and belong
-   with this work: there are four kinds
-   (`NotFound`/`InvalidInput`/`Conflict`/`Internal`), so a stall would surface as
-   `Internal` and a namespace violation (§5) would too. Neither may be fudged that
-   way — S7 is about the client recovering a *named* kind — so `Timeout` and
-   `Forbidden` are two small decisions to take, each with a status, a JSON-RPC code
-   and an exit code.
+   adds no deadline knob of its own. A stall is `Timeout` and a namespace
+   violation (§5) is `Forbidden`; neither is reported as `Internal`, because S7 is
+   about the client recovering a *named* kind. Each kind owns one HTTP status, one
+   JSON-RPC code and one exit code (`gabion/src/error.rs`), so it round-trips through
+   `WireError` and `FromWire` instead of being flattened at the boundary.
 4. **End of stream is explicit, and the framing must prove it.** A stream ends with
    an `end` frame (`done` / `cancelled`) or an `error` frame carrying a `WireError`.
    **A channel that dies without one of the three is a transport failure, not a
@@ -516,7 +528,7 @@ that is the app's type, not the framework's.
   request/response, and the client parses a whole body (§6).
 - `crates/gabion/src/mcp/server.rs` — `handle(&str) -> Option<String>`, and the
   in-flight registry that makes inbound cancellation work (§9).
-- `crates/gabion/src/error.rs` — four `ErrorKind` variants (§7.3).
+- `crates/gabion/src/error.rs` — six `ErrorKind` variants (§7.3).
 - `crates/gabion-cli/src/edges.rs` — `tokio`, `async-std`, `smol` are already
   banned in a core (§8).
 - `docs/local-first-collab.md` §4.2, §4.4, §7 — the stream there is on the
