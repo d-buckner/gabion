@@ -46,7 +46,7 @@ fn fix_for(rule: &'static str) -> &'static str {
             "the render crate may name the service *trait* (from *-api) only; the host injects the impl. Never depend on *-core."
         }
         "feature-wall" => {
-            "talk to the other feature through its *-api crate; the in-process call works today and the generated HTTP client is planned. Its core internals are not yours."
+            "talk to the other feature through its *-api crate: it carries the trait and its wire types, and the generated client for that trait implements the same trait over `Http`, so the same call site works in-process and across a socket. Its core internals are not yours."
         }
         "contract-purity" => "the contract crate holds wire types and the trait only. Move the type into *-api and let *-core depend on it.",
         "upward-leak" => "shared is below every feature: it may depend on the gabion runtime only.",
@@ -200,4 +200,75 @@ fn check_edge(from: &Crate, to: &Crate, cfg: &Config) -> Option<Finding> {
         ),
         fix_for(rule),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::{fix_for, rule_name, Class};
+
+    /// Every class, so the test walks every rule `rule_name` can answer with. A
+    /// new rule or a new class pair is checked without anyone remembering to add
+    /// it here.
+    const ALL_CLASSES: &[Class] = &[
+        Class::Api,
+        Class::Core,
+        Class::Render,
+        Class::Shared,
+        Class::Host,
+        Class::Framework,
+        Class::EffectHome,
+        Class::Unclassified,
+    ];
+
+    /// Wording that promises the fix does not exist yet. The fix line is the one
+    /// thing a zero-context agent reads, so a stale one teaches the wrong model
+    /// at the exact moment it is consulted: it either duplicates the feature or
+    /// asks a human. Words are compared whole, so `incoming` is not `coming`.
+    const STALE_WORDS: &[&str] = &["planned", "will", "coming", "soon"];
+    const STALE_PHRASES: &[&str] = &["not built yet", "not yet built"];
+
+    fn stale_promise(fix: &str) -> Option<String> {
+        let lowered = fix.to_lowercase();
+        for phrase in STALE_PHRASES {
+            if lowered.contains(phrase) {
+                return Some((*phrase).to_string());
+            }
+        }
+        lowered
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .find(|word| STALE_WORDS.contains(word))
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn no_fix_line_promises_a_future() {
+        for &from in ALL_CLASSES {
+            for &to in ALL_CLASSES {
+                let rule = rule_name(from, to);
+                let fix = fix_for(rule);
+                if let Some(stale) = stale_promise(fix) {
+                    panic!("the `{rule}` fix text still promises a future (`{stale}`): {fix}");
+                }
+            }
+        }
+    }
+
+    /// The generated client is built, not planned: `gen_client` emits
+    /// `<Feature>Client<H: Http>` implementing the service trait itself. The
+    /// `feature-wall` fix has to name that path, because an agent that hits the
+    /// wall is told there is a way through or it invents its own.
+    #[test]
+    fn the_feature_wall_fix_names_the_generated_client() {
+        let fix = fix_for(rule_name(Class::Core, Class::Core));
+        assert!(
+            fix.contains("Http"),
+            "the feature-wall fix must name the generated client over `Http`, got: {fix}"
+        );
+        assert!(
+            fix.contains("*-api"),
+            "the feature-wall fix must name the contract crate that carries the trait, got: {fix}"
+        );
+    }
 }
