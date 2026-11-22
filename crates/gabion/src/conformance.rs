@@ -170,15 +170,27 @@ pub fn ok_value<T: Serialize>(value: &T) -> Value {
 /// stream and reported it as finished would otherwise look identical to one that
 /// delivered everything, which is the fail-open §7.4 names.
 #[must_use]
-pub fn stream_value(items: Vec<Value>, end: &str) -> Value {
+pub fn stream_value(items: Vec<Value>, end: Value) -> Value {
     serde_json::json!({ "items": items, "end": end })
+}
+
+/// A listen op that failed before its first item, in the shape every surface
+/// answers a stream in.
+///
+/// An ordinary op answers with one value, so its failure is one value too. A
+/// listen op answers with `{items, end}`, and the MCP surface cannot answer a
+/// stream op with a bare value at all: a refusal to open has to arrive as an
+/// empty list that ended in the error, or the four surfaces cannot be compared.
+#[must_use]
+pub fn stream_refused(end: Value) -> Value {
+    stream_value(Vec::new(), end)
 }
 
 /// A stream that never started, as the suite compares it. The refusal is the
 /// result, so a surface that refuses is reported rather than skipped.
 #[must_use]
 pub fn refused_value(why: &str) -> Value {
-    serde_json::json!({ "items": [], "end": why })
+    stream_refused(Value::String(why.to_string()))
 }
 
 /// Drain a stream into the JSON values the suite compares.
@@ -214,7 +226,7 @@ pub fn ndjson_value(text: &str) -> Value {
             Err(e) => return refused_value(&format!("stdout line is not JSON: {e}")),
         }
     }
-    stream_value(items, "done")
+    stream_value(items, serde_json::json!("done"))
 }
 
 /// What the MCP stdio transport answered for a listen op: the items it sent as
@@ -225,7 +237,11 @@ pub fn mcp_stream_value(reply: &str, notifications: &[String]) -> Value {
         return refused_value("<the mcp reply is not JSON>");
     };
     if let Some(error) = answer.get("error") {
-        return refused_value(&error.to_string());
+        // The JSON-RPC envelope carries the app's own error in `data`. That is
+        // the value the other three surfaces answer with, so it is the value
+        // this one ends with.
+        let inner = error.get("data").cloned().unwrap_or_else(|| error.clone());
+        return stream_refused(inner);
     }
     let end = answer
         .pointer("/result/structuredContent/end")
@@ -247,7 +263,7 @@ pub fn mcp_stream_value(reply: &str, notifications: &[String]) -> Value {
             _ => return refused_value("<a progress notification carried no item>"),
         }
     }
-    stream_value(items, end)
+    stream_value(items, serde_json::json!(end))
 }
 
 /// A failure that arrived as a bare `WireError` — from the MCP tool path or from

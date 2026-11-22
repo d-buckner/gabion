@@ -230,3 +230,39 @@ async fn every_stream_op_is_driven_through_every_built_adapter() {
         assert_eq!(agreement.http, agreement.inproc, "{} http", agreement.op);
     }
 }
+
+/// A listen op that fails before its first item is a case like any other.
+///
+/// The MCP surface cannot answer a stream op with a bare value, so a refusal has
+/// to arrive as an empty item list that ended in the error on every surface.
+/// Before that normalisation the in-process, CLI and HTTP surfaces answered with
+/// the bare error and MCP wrapped it, and the suite reported a disagreement for
+/// an op that had behaved correctly.
+#[tokio::test]
+async fn a_listen_op_that_fails_at_open_agrees() {
+    let (checks, incidents) = host_pulse_server::services();
+    let base = serve(checks.clone(), incidents.clone()).await;
+
+    let cases = [Case::new("check.watch", json!("no-such-watch"))];
+    let report = checks_api::check_conformance(
+        checks,
+        gabion_native::ReqwestHttp::new(),
+        gabion_native::WsStreams,
+        &base,
+        &cases,
+    )
+    .await;
+    assert!(report.is_clean(), "{}", report.summary());
+
+    let agreement = report.agreements.first().unwrap();
+    assert!(
+        agreement.inproc["items"].as_array().unwrap().is_empty(),
+        "a stream that never opened delivered items: {}",
+        agreement.inproc
+    );
+    assert_eq!(
+        agreement.inproc["end"]["kind"], "not_found",
+        "the error the impl chose must survive as the end: {}",
+        agreement.inproc
+    );
+}
