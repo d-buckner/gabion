@@ -13,7 +13,7 @@ Ordered by how much damage the silence does.
 
 ## 1. Fail-open defaults (worst class: it passes and means nothing)
 
-Nothing open. Eight items have been here in total and each was confirmed by
+Nothing open. Nine items have been here in total and each was confirmed by
 running the checker against a fixture before it was fixed; the closed list is in
 §7.
 
@@ -337,6 +337,17 @@ config and no way to run it in a browser.
 - **The spec claimed a Cargo.toml wall that did not exist.** `unsafe_code =
   "forbid"` is now set once for the workspace and `workspace-lints` audits it,
   including a member that never opts in.
+- **The gate's own config parser was fail-open.** A typo'd `edges` key fell back
+  to `unclassified`, leaving the *default* row in force, and an unknown
+  `max-thresholds` key was taken as a stricter requirement that `--fix` then wrote
+  into `clippy.toml`, where clippy hard-errors on it. `Config::apply` now returns
+  an error for a class outside the eight names, a threshold key the config does
+  not already carry, and a row of the wrong type, which `check` renders as a
+  named `FAIL step:config: ...` — the same class as §1. `Class::from_key` is the
+  one name lookup, so nothing else can spell a class into existence. Proven by
+  `a_typo_in_the_edge_table_is_a_finding_not_a_default`,
+  `an_unknown_threshold_key_is_a_finding_and_fix_does_not_write_it`, and
+  `a_malformed_config_row_is_a_finding_not_skipped`.
 - **An app could loosen the audit that audits it.** `Config::apply` takes the
   tighter of the two values. Proven by `an_app_cannot_loosen_a_required_threshold`.
 - **A contract could re-export a whole module.** `contract-glob` reads the contract
