@@ -195,3 +195,13 @@ The required bans and clippy thresholds work the other way. An app may tighten
 them through `max-thresholds`. The gate only ever tightens them: a value that
 would raise a limit is ignored, and the raised `clippy.toml` is then a
 `clippy-config` finding.
+
+The gate parses its own config strictly, because a key it does not recognise is
+exactly the failure class it exists to delete: a row that reads as applied while
+the default stays in force. An `edges` key outside the eight class names, a
+`max-thresholds` key outside the thresholds `clippy.toml` carries, and a row of
+the wrong type (a `core` that is a string rather than an array, a threshold that
+is not an integer) each fail the run as `FAIL step:config: ...`, naming the key
+and the accepted set. `gabion check --fix` applies nothing after a config
+failure, so a typo cannot be carried into `clippy.toml` — where clippy would
+hard-error on it and point at the wrong file.

@@ -42,17 +42,33 @@ impl Class {
         }
     }
 
+    /// Every class name, in the order an error message lists them.
+    pub const KEYS: &'static [&'static str] = &[
+        "api",
+        "core",
+        "render",
+        "shared",
+        "host",
+        "framework",
+        "effect-home",
+        "unclassified",
+    ];
+
+    /// The one name -> class lookup. `None` is a name gabion does not know, which
+    /// the config parser has to report: a typo that fell back to a class would
+    /// read as a row applied while the default row stayed in force.
     #[must_use]
-    pub fn parse(s: &str) -> Class {
+    pub fn from_key(s: &str) -> Option<Class> {
         match s {
-            "api" => Class::Api,
-            "core" => Class::Core,
-            "render" => Class::Render,
-            "shared" => Class::Shared,
-            "host" => Class::Host,
-            "effect-home" => Class::EffectHome,
-            "framework" => Class::Framework,
-            _ => Class::Unclassified,
+            "api" => Some(Class::Api),
+            "core" => Some(Class::Core),
+            "render" => Some(Class::Render),
+            "shared" => Some(Class::Shared),
+            "host" => Some(Class::Host),
+            "effect-home" => Some(Class::EffectHome),
+            "framework" => Some(Class::Framework),
+            "unclassified" => Some(Class::Unclassified),
+            _ => None,
         }
     }
 }
@@ -222,11 +238,16 @@ impl Config {
         else {
             return Ok(cfg);
         };
-        cfg.apply(gabion);
+        cfg.apply(gabion)?;
         Ok(cfg)
     }
 
-    fn apply(&mut self, gabion: &toml::Value) {
+    /// Apply the app's overrides, or say which key gabion cannot read.
+    ///
+    /// Strict on purpose: a key that does not match one gabion knows would leave
+    /// the default in force while reading as a wall the app tightened, so the
+    /// failure is loud here rather than silent later.
+    fn apply(&mut self, gabion: &toml::Value) -> Result<(), String> {
         if let Some(list) = gabion
             .get("framework-crates")
             .and_then(toml::Value::as_array)
@@ -251,27 +272,83 @@ impl Config {
         if let Some(n) = gabion.get("max-branches").and_then(toml::Value::as_integer) {
             self.max_branches = n as usize;
         }
-        if let Some(table) = gabion.get("edges").and_then(toml::Value::as_table) {
-            for (class, allowed) in table {
-                if let Some(list) = allowed.as_array() {
-                    let names: Vec<String> = list
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect();
-                    self.edges.insert(Class::parse(class).key(), names);
-                }
-            }
+        if let Some(value) = gabion.get("edges") {
+            self.apply_edges(value)?;
         }
-        if let Some(table) = gabion.get("max-thresholds").and_then(toml::Value::as_table) {
-            for (key, v) in table {
-                if let Some(n) = v.as_integer() {
-                    // Only ever tighten. A key that could raise a limit would
-                    // loosen the audit that reads this same map.
-                    let max = self.max_thresholds.get(key).copied().unwrap_or(i64::MAX);
-                    self.max_thresholds.insert(key.clone(), n.min(max));
-                }
-            }
+        if let Some(value) = gabion.get("max-thresholds") {
+            self.apply_thresholds(value)?;
         }
+        Ok(())
+    }
+
+    /// `[workspace.metadata.gabion.edges]`: class -> the classes it may depend
+    /// on. A key outside the class set, or a row that is not an array of class
+    /// names, is an error rather than a row that quietly does nothing.
+    fn apply_edges(&mut self, value: &toml::Value) -> Result<(), String> {
+        let classes = Class::KEYS.join(", ");
+        let Some(table) = value.as_table() else {
+            return Err(format!(
+                "[workspace.metadata.gabion] edges must be a table of class -> array of \
+                 class names, got `{value}`"
+            ));
+        };
+        for (name, allowed) in table {
+            let Some(class) = Class::from_key(name) else {
+                return Err(format!(
+                    "unknown class `{name}` in [workspace.metadata.gabion.edges]; \
+                     accepted: {classes}"
+                ));
+            };
+            let Some(list) = allowed.as_array() else {
+                return Err(format!(
+                    "[workspace.metadata.gabion.edges] {name} must be an array of class \
+                     names, got `{allowed}`"
+                ));
+            };
+            let mut names = Vec::with_capacity(list.len());
+            for entry in list {
+                let Some(target) = entry.as_str().filter(|t| Class::from_key(t).is_some()) else {
+                    return Err(format!(
+                        "[workspace.metadata.gabion.edges] {name} lists `{entry}`, which is \
+                         not a class name; accepted: {classes}"
+                    ));
+                };
+                names.push(target.to_string());
+            }
+            self.edges.insert(class.key(), names);
+        }
+        Ok(())
+    }
+
+    /// `max-thresholds`: a known clippy key, lowered or not.
+    fn apply_thresholds(&mut self, value: &toml::Value) -> Result<(), String> {
+        let accepted = self.max_thresholds.keys().cloned().collect::<Vec<_>>();
+        let accepted = accepted.join(", ");
+        let Some(table) = value.as_table() else {
+            return Err(format!(
+                "[workspace.metadata.gabion] max-thresholds must be a table of threshold \
+                 -> integer, got `{value}`"
+            ));
+        };
+        for (key, v) in table {
+            // Only ever tighten. A key that could raise a limit would loosen the
+            // audit that reads this same map, and a key gabion does not know
+            // would be demanded of clippy.toml by name.
+            let Some(max) = self.max_thresholds.get(key).copied() else {
+                return Err(format!(
+                    "unknown threshold `{key}` in [workspace.metadata.gabion] \
+                     max-thresholds; accepted: {accepted}"
+                ));
+            };
+            let Some(n) = v.as_integer() else {
+                return Err(format!(
+                    "[workspace.metadata.gabion] max-thresholds {key} must be an integer, \
+                     got `{v}`"
+                ));
+            };
+            self.max_thresholds.insert(key.clone(), n.min(max));
+        }
+        Ok(())
     }
 
     #[must_use]
