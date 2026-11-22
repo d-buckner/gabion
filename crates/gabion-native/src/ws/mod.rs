@@ -19,7 +19,11 @@
 //!   order. Different namespaces run concurrently, so one slow op cannot hold up
 //!   another feature — that is the bug the MCP stdio pump was rebuilt to avoid.
 //! - **`close` is out of band.** It is handled in the read loop, never queued
-//!   behind a call that is still in flight.
+//!   behind a call that is still in flight, nor behind an `open` still accepting:
+//!   a stream's record is claimed before its op starts, and the start runs in a
+//!   task of its own, so a `close` reaches the registry while a slow producer is
+//!   still deciding. Nothing in the read loop waits on the write queue either, so
+//!   a stalled writer cannot keep it from reaching that `close`.
 //! - **Policy is the signature's (§7.2, §7.3).** `Each` awaits every write, so a
 //!   slow subscriber backpressures the connection. `Latest` holds one slot and
 //!   replaces an untaken value, so it cannot.
@@ -33,11 +37,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use futures_util::{SinkExt, StreamExt};
 use gabion::ctx::{Cancel, Ctx};
-use gabion::error::ErrorKind;
+use gabion::error::{ErrorKind, WireError};
 use gabion::frames::{Frame, StreamId};
 use gabion::ws::WsService;
 
-use pump::{fail, no_such_op, pump};
+use pump::{fail, no_such_op, pump, refuse};
 use registry::{locked, Call, Registry};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -115,8 +119,7 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
                             StreamId(0),
                             ErrorKind::InvalidInput,
                             &format!("frame would not parse: {e}"),
-                        )
-                        .await;
+                        );
                         break;
                     }
                 };
@@ -125,7 +128,7 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
                     registry: &registry,
                     out: &out,
                 };
-                if !read_one(frame, &conn).await {
+                if !read_one(frame, &conn) {
                     break;
                 }
             }
@@ -137,7 +140,12 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
     }
 
     // The socket is gone. Every producer on it is cancelled, including one that is
-    // idle and would otherwise sit on a stream nobody is reading (§7.4).
+    // idle and would otherwise sit on a stream nobody is reading (§7.4), and
+    // including a start that has not returned yet: `cancel_all` cancels the token
+    // claimed before it ran. The reader's own sender goes next, but the writer is
+    // awaited rather than dropped, so a task that was already holding a frame — a
+    // retry, a pump's terminator — still gets its turn on the queue: the connection
+    // closes when the last sender is gone, not when this loop stops reading.
     locked(&registry).cancel_all();
     drop(out);
     let _ = writer.await;
@@ -151,7 +159,11 @@ pub(super) struct Conn<'a> {
 }
 
 /// Handle one client frame. `false` means the connection is over.
-async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
+///
+/// Nothing here awaits: the one reader on the connection is also the only place a
+/// `close` is handled, so anything it waited for — an op still accepting, a write
+/// queue with no room — would be a producer that cannot be cancelled.
+fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
     let Conn { registry, out, .. } = *conn;
     match frame {
         Frame::Open {
@@ -160,14 +172,7 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
             input,
             meta,
         } => {
-            open(OpenRequest {
-                id,
-                op,
-                input,
-                ctx: Ctx::from_meta(&meta),
-                conn,
-            })
-            .await;
+            start(id, op, input, &meta, conn);
             true
         }
         Frame::Call {
@@ -176,19 +181,20 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
             input,
             meta,
         } => {
-            call(id, op, input, &meta, conn).await;
+            call(id, op, input, &meta, conn);
             true
         }
         Frame::Close { id } => {
-            // Out of band: never queued behind a call still in flight.
+            // Out of band: never queued behind a call still in flight, and never
+            // behind an `open` still starting — the record it removes is claimed
+            // before that start runs.
             if !locked(registry).close(id) {
                 fail(
                     out,
                     id,
                     ErrorKind::NotFound,
                     &format!("stream {id} was not opened on this connection"),
-                )
-                .await;
+                );
             }
             true
         }
@@ -198,62 +204,61 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
                 other.id(),
                 ErrorKind::InvalidInput,
                 &format!("{other:?} is not a frame a client sends"),
-            )
-            .await;
+            );
             true
         }
     }
 }
 
-/// One `open` frame, resolved against the mounted services.
-struct OpenRequest<'a> {
-    id: StreamId,
-    op: String,
-    input: Value,
-    ctx: Ctx,
-    conn: &'a Conn<'a>,
-}
-
-async fn open(request: OpenRequest<'_>) {
-    let OpenRequest {
-        id,
-        op,
-        input,
-        ctx,
-        conn,
-    } = request;
+/// Claim one `open`'s id, then start it in its own task.
+///
+/// The claim is synchronous and comes first on purpose. A `close` is answered from
+/// the registry, so a stream must be in it before its op has had a chance to run:
+/// otherwise the one producer the out-of-band rule exists for — the one still
+/// reading its store, listing its targets, subscribing upstream — is the one a
+/// `close` cannot find and cannot cancel. The start then does what `pump` does: own
+/// its frames, and answer its own failure.
+fn start(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     let Conn {
         surface,
         registry,
         out,
     } = *conn;
     let Some(service) = surface.find(&op) else {
-        let _ = out.send(no_such_op(id, &op)).await;
+        refuse(out, no_such_op(id, &op));
         return;
     };
     let ns = service.ns().to_string();
     let cancel = Cancel::new();
     if !locked(registry).claim(id, ns.clone(), cancel.clone()) {
-        fail(
-            out,
-            id,
+        let error = WireError::new(
             ErrorKind::Conflict,
-            &format!("stream {id} is already open on this connection"),
-        )
-        .await;
+            format!("stream {id} is already open on this connection"),
+        );
+        refuse(out, Frame::Error { id, error });
         return;
     }
-    let ctx = ctx.with_cancel(cancel);
-    let started = service.open(&ctx, &op, input).await;
-    let opened = match started {
-        Ok(opened) => opened,
-        Err(error) => {
-            let _ = out.send(Frame::Error { id, error }).await;
-            locked(registry).retire(id);
-            return;
-        }
-    };
-    tokio::spawn(pump(id, ns, opened, ctx, out.clone(), Arc::clone(registry)));
+    let service = Arc::clone(service);
+    let ctx = Ctx::from_meta(meta).with_cancel(cancel);
+    let registry = Arc::clone(registry);
+    let out = out.clone();
+    tokio::spawn(async move {
+        let opened = match service.open(&ctx, &op, input).await {
+            Ok(opened) => opened,
+            Err(error) => {
+                // A start that fails still owes its id back: the refusal is the
+                // answer to the `open`, and leaving the record behind would keep the
+                // namespace wall open for an id no stream is behind.
+                let _ = out.send(Frame::Error { id, error }).await;
+                locked(&registry).retire(id);
+                return;
+            }
+        };
+        // Even a start that was closed or cancelled while it ran gets its pump: the
+        // terminator is the answer to that `close`, and the token it already holds
+        // ends it immediately.
+        tokio::spawn(pump(id, ns, opened, ctx, out, registry));
+    });
 }
 
 /// One ordinary op on a stream this connection already opened (§5).
@@ -263,13 +268,16 @@ async fn open(request: OpenRequest<'_>) {
 /// names a namespace with no live stream has no queue, so it is refused rather than
 /// run — and the refusal names that namespace, because "that stream is over" and
 /// "you never opened this" are different answers a client acts on differently.
-async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
+///
+/// Dispatching is a send onto an unbounded queue, so the read loop never waits for
+/// the call: the queue's own task writes the reply (§7.1).
+fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     let Conn { registry, out, .. } = *conn;
     let Some(ns) = Frame::op_namespace(&op) else {
         // A name with no namespace cannot address any stream, which the client's own
         // check calls `InvalidInput`; the server must not answer it differently.
         let why = format!("`{op}` is not a namespaced op");
-        fail(out, id, ErrorKind::InvalidInput, &why).await;
+        fail(out, id, ErrorKind::InvalidInput, &why);
         return;
     };
     let ns = ns.to_string();
@@ -292,8 +300,7 @@ async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<
                     "`{op}` is outside every namespace this connection opened: \
                      no stream in `{ns}` is live"
                 ),
-            )
-            .await;
+            );
         }
     }
 }

@@ -23,6 +23,7 @@ pub use std::sync::atomic::{AtomicUsize, Ordering};
 pub use std::sync::{Arc, Mutex};
 pub use std::task::{Context, Poll};
 pub use std::time::Duration;
+pub use tokio::sync::Notify;
 pub use tokio::time::Instant;
 
 // The raw-socket helpers below use the sink and stream halves the way the transport
@@ -48,6 +49,15 @@ pub struct Feature {
     /// blocked on can fail and tear the stream down. Both end the producer; only one
     /// of them polls the token, and the surface promises the first thing.
     pub stopped: Arc<AtomicUsize>,
+    /// Held by a listen op's entry point until the test opens it. A real producer
+    /// spends this time reading its store, listing its targets and subscribing
+    /// upstream, and a start that is never opened can only fail to finish.
+    pub gate: Option<Arc<Notify>>,
+    /// Incremented when a gated start was released by its cancel token rather than
+    /// by its gate. The evidence for
+    /// `a_close_reaches_an_open_that_is_still_starting`: the cancel was observed
+    /// *inside* the start, so it cannot have been read after the start returned.
+    pub released_by_cancel: Arc<AtomicUsize>,
 }
 
 impl Feature {
@@ -57,6 +67,17 @@ impl Feature {
             items,
             every: Duration::ZERO,
             stopped: Arc::new(AtomicUsize::new(0)),
+            gate: None,
+            released_by_cancel: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// A feature whose listen ops take their time to accept: the start parks on a
+    /// gate the test never opens, so only its cancel token can release it.
+    pub fn gated(ns: &'static str) -> Self {
+        Self {
+            gate: Some(Arc::new(Notify::new())),
+            ..Self::new(ns, FOREVER)
         }
     }
 
@@ -125,12 +146,37 @@ impl WsService for Feature {
         };
         let cancel = ctx.cancel_token().clone();
         let stopped = Arc::clone(&self.stopped);
+        let gate = self.gate.clone();
+        let released = Arc::clone(&self.released_by_cancel);
         Box::pin(async move {
             if !op.starts_with(&format!("{ns}.")) {
                 return Err(WireError::new(
                     ErrorKind::NotFound,
                     format!("`{op}` is not a listen op on {ns}"),
                 ));
+            }
+            if let Some(gate) = gate {
+                let accepted = tokio::select! {
+                    () = gate.notified() => true,
+                    () = cancel.cancelled() => false,
+                };
+                if !accepted {
+                    // The reader is gone while this start was still accepting. The
+                    // stream nothing is left to produce: the entry point stops here
+                    // exactly as a producer that noticed the cancel would.
+                    released.fetch_add(1, Ordering::SeqCst);
+                    return Ok(Opened {
+                        policy,
+                        items: Box::pin(Ticking {
+                            left: 0,
+                            seen: 0,
+                            every,
+                            until: None,
+                            cancel: cancel.clone(),
+                            stopped,
+                        }),
+                    });
+                }
             }
             Ok(Opened {
                 policy,
