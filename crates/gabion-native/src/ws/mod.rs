@@ -27,6 +27,10 @@
 //! - **Policy is the signature's (§7.2, §7.3).** `Each` awaits every write, so a
 //!   slow subscriber backpressures the connection. `Latest` holds one slot and
 //!   replaces an untaken value, so it cannot.
+//! - **Every queue on this path is bounded (§5).** `WRITE_QUEUE` frames may sit
+//!   unwritten and `CALL_QUEUE` calls may wait for one namespace's queue; a producer
+//!   waits out the first, and the read loop refuses the overflow rather than growing
+//!   either one. The limits are `64` each, and §5 says so.
 //! - **An end is stated (§7.4).** Every stream leaves through `end` or `error`. A
 //!   dropped socket cancels its producers rather than letting them run on.
 
@@ -42,7 +46,7 @@ use gabion::frames::{Frame, StreamId};
 use gabion::ws::WsService;
 
 use pump::{fail, no_such_op, pump, refuse};
-use registry::{locked, Call, Registry};
+use registry::{locked, Call, Registry, CALL_QUEUE};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -269,8 +273,10 @@ fn start(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) 
 /// run — and the refusal names that namespace, because "that stream is over" and
 /// "you never opened this" are different answers a client acts on differently.
 ///
-/// Dispatching is a send onto an unbounded queue, so the read loop never waits for
-/// the call: the queue's own task writes the reply (§7.1).
+/// Dispatching is one non-blocking send onto the namespace's bounded queue, so the
+/// read loop never waits for the call: the queue's own task writes the reply (§7.1).
+/// A call that does not fit is refused rather than queued or dropped — waiting for
+/// room here would hold the `close` this loop alone can answer (§5, §7.4).
 fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     let Conn { registry, out, .. } = *conn;
     let Some(ns) = Frame::op_namespace(&op) else {
@@ -282,25 +288,42 @@ fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     };
     let ns = ns.to_string();
     let sender = locked(registry).sender_for(&ns, conn);
-    match sender {
-        Some(sender) => {
-            let _ = sender.send(Call {
-                op,
-                input,
-                ctx: Ctx::from_meta(meta),
-                id,
-            });
-        }
-        None => {
-            fail(
-                out,
-                id,
-                ErrorKind::Forbidden,
-                &format!(
-                    "`{op}` is outside every namespace this connection opened: \
-                     no stream in `{ns}` is live"
-                ),
-            );
-        }
+    let Some(sender) = sender else {
+        fail(
+            out,
+            id,
+            ErrorKind::Forbidden,
+            &format!(
+                "`{op}` is outside every namespace this connection opened: \
+                 no stream in `{ns}` is live"
+            ),
+        );
+        return;
+    };
+    let queued = sender.try_send(Call {
+        op,
+        input,
+        ctx: Ctx::from_meta(meta),
+        id,
+    });
+    match queued {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => fail(
+            out,
+            id,
+            ErrorKind::Internal,
+            &format!(
+                "the `{ns}` call queue is full ({CALL_QUEUE} calls already waiting), \
+                 so this one was not queued"
+            ),
+        ),
+        // The queue's task is gone only when the connection is going with it, and a
+        // client that never hears back cannot tell that from a slow op.
+        Err(mpsc::error::TrySendError::Closed(_)) => fail(
+            out,
+            id,
+            ErrorKind::Internal,
+            &format!("the `{ns}` call queue is closed: the connection is going away"),
+        ),
     }
 }

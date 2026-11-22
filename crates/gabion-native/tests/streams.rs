@@ -223,3 +223,32 @@ fn opening_outside_a_runtime_says_so() {
         .expect_err("no runtime here");
     assert!(err.to_string().contains("runtime"), "{err}");
 }
+
+/// A bounded read queue bounds work, it does not lose frames (§5).
+///
+/// The peer sends more frames than the queue holds in one burst; the pump stops
+/// taking them off the socket until the consumer has, and every one of them still
+/// arrives, in order.
+#[tokio::test]
+async fn a_burst_larger_than_the_read_queue_arrives_whole_and_in_order() {
+    const COUNT: u32 = 200;
+    let mut script: Vec<Frame> = (0..COUNT)
+        .map(|n| Frame::Item {
+            id: StreamId(1),
+            ns: "pulse".into(),
+            data: reading(n),
+        })
+        .collect();
+    script.push(Frame::End {
+        id: StreamId(1),
+        reason: EndReason::Done,
+    });
+    let (url, _server) = serve(script).await;
+
+    let (_channel, mut stream) = subscribe(&WsStreams::new(), &url);
+    let mut got = Vec::new();
+    while let Some(next) = stream.next().await {
+        got.push(next.expect("no frame is refused"));
+    }
+    assert_eq!(got, (0..COUNT).collect::<Vec<_>>(), "whole, and in order");
+}
