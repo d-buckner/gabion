@@ -72,6 +72,7 @@ pub fn ws_head_with_lints(members: &[&str], lints: &str) -> String {
         .map(|m| format!("\"{m}\""))
         .collect::<Vec<_>>()
         .join(", ");
+    let edges = honest_edges();
     format!(
         "\
 [workspace]
@@ -84,16 +85,26 @@ effect-homes = []
 max-file-lines = 12
 max-branches = 2
 
-[workspace.metadata.gabion.edges]
-api = [\"framework\", \"shared\", \"api\"]
-core = [\"framework\", \"shared\", \"api\"]
-render = [\"framework\", \"shared\", \"api\"]
-shared = [\"framework\"]
-host = [\"framework\", \"shared\", \"api\", \"core\", \"render\"]
-framework = [\"framework\"]
-unclassified = []
-{lints}"
+{edges}{lints}",
     )
+}
+
+/// The `[workspace.metadata.gabion.edges]` table gabion ships, rendered from the
+/// same defaults the rule reads. A fixture that copied the table by hand would
+/// keep passing after a class joined the defaults, which is the drift the
+/// effect-home class would have walked straight into.
+fn honest_edges() -> String {
+    let cfg = Config::default();
+    let mut out = String::from("[workspace.metadata.gabion.edges]\n");
+    for (class, allowed) in &cfg.edges {
+        let allowed = allowed
+            .iter()
+            .map(|a| format!("\"{a}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!("{class} = [{allowed}]\n"));
+    }
+    out
 }
 
 /// A clippy.toml carrying exactly the bans and thresholds gabion requires.

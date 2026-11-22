@@ -177,7 +177,7 @@ The edge table is data, not code. An app widens or tightens its own walls in
 
 ```toml
 [workspace.metadata.gabion]
-effect-homes = ["myapp-cli"]     # crates allowed to perform effects
+effect-homes = ["myapp-cli"]     # crates allowed to perform effects; `*-native` is already one
 max-file-lines = 400
 max-branches = 10
 

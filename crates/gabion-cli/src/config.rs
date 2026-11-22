@@ -18,6 +18,10 @@ pub enum Class {
     Shared,
     Host,
     Framework,
+    /// Where an app's own effects live: a pty, a serial port, a C library. The
+    /// name gabion gives it is `-native`, or a line in
+    /// `[workspace.metadata.gabion] effect-homes`.
+    EffectHome,
     /// A workspace member gabion cannot classify — which is itself a failure,
     /// because an unclassified crate slips past the whole edge table.
     Unclassified,
@@ -32,6 +36,7 @@ impl Class {
             Class::Render => "render",
             Class::Shared => "shared",
             Class::Host => "host",
+            Class::EffectHome => "effect-home",
             Class::Framework => "framework",
             Class::Unclassified => "unclassified",
         }
@@ -45,10 +50,26 @@ impl Class {
             "render" => Class::Render,
             "shared" => Class::Shared,
             "host" => Class::Host,
+            "effect-home" => Class::EffectHome,
             "framework" => Class::Framework,
             _ => Class::Unclassified,
         }
     }
+}
+
+/// Crate-name suffix -> class, in the order a name is matched.
+const SUFFIX_CLASSES: &[(&str, Class)] = &[
+    ("-api", Class::Api),
+    ("-core", Class::Core),
+    ("-render", Class::Render),
+    ("-shared", Class::Shared),
+];
+
+/// Where a host lives when its name does not say so.
+const HOST_DIRS: &[&str] = &["hosts/", "/hosts/"];
+
+fn is_host_name(name: &str) -> bool {
+    name.starts_with("host-") || name.ends_with("-host")
 }
 
 pub struct Config {
@@ -107,7 +128,20 @@ fn default_edges() -> BTreeMap<&'static str, Vec<String>> {
     // rule, which treats `pub` in a render crate as published surface.
     m.insert("render", v(&["framework", "shared", "api", "render"]));
     m.insert("shared", v(&["framework"]));
-    m.insert("host", v(&["framework", "shared", "api", "core", "render"]));
+    m.insert(
+        "host",
+        v(&[
+            "framework",
+            "shared",
+            "api",
+            "core",
+            "render",
+            "effect-home",
+        ]),
+    );
+    // An effect home is where the banned crates belong, so it reads the runtime
+    // and the contracts but never another feature's logic or UI.
+    m.insert("effect-home", v(&["framework", "shared", "api"]));
     m.insert("framework", v(&["framework"]));
     m.insert("unclassified", Vec::new());
     m
@@ -252,24 +286,23 @@ impl Config {
         if self.framework_crates.iter().any(|f| f == name) {
             return Class::Framework;
         }
-        if name.ends_with("-api") {
-            return Class::Api;
+        // The list is the app naming its own effect home, so it outranks a suffix.
+        if self.effect_homes.iter().any(|h| h == name) {
+            return Class::EffectHome;
         }
-        if name.ends_with("-core") {
-            return Class::Core;
-        }
-        if name.ends_with("-render") {
-            return Class::Render;
-        }
-        if name == "shared" || name.ends_with("-shared") {
+        if name == "shared" {
             return Class::Shared;
         }
-        if name.starts_with("host-")
-            || name.ends_with("-host")
-            || rel_dir.starts_with("hosts/")
-            || rel_dir.contains("/hosts/")
-        {
+        if let Some((_, class)) = SUFFIX_CLASSES.iter().find(|(s, _)| name.ends_with(s)) {
+            return *class;
+        }
+        if is_host_name(name) || HOST_DIRS.iter().any(|d| rel_dir.contains(d)) {
             return Class::Host;
+        }
+        // After the host test on purpose: `host-native` is a host written in
+        // native code, `dh-native` is a home for effects.
+        if name.ends_with("-native") {
+            return Class::EffectHome;
         }
         Class::Unclassified
     }
@@ -277,6 +310,7 @@ impl Config {
     #[must_use]
     pub fn is_effect_home(&self, name: &str, class: Class) -> bool {
         class == Class::Host
+            || class == Class::EffectHome
             || name.ends_with("-native")
             || self.effect_homes.iter().any(|h| h == name)
     }

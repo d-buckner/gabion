@@ -32,6 +32,7 @@ fn rule_name(from: Class, to: Class) -> &'static str {
         | (Class::Framework, Class::Render)
         | (Class::Framework, Class::Shared) => "framework-purity",
         (_, Class::Host) => "host-dependency",
+        (_, Class::EffectHome) => "effect-home-dependency",
         (Class::Core, Class::Render) => "core-imports-render",
         _ => "edge-table",
     }
@@ -51,6 +52,9 @@ fn fix_for(rule: &'static str) -> &'static str {
         "upward-leak" => "shared is below every feature: it may depend on the gabion runtime only.",
         "framework-purity" => "the gabion runtime must stay app-agnostic; move the app-specific code into a feature.",
         "host-dependency" => "hosts are composition roots: nothing may depend on them.",
+        "effect-home-dependency" => {
+            "an effect home holds the effects: it may depend on gabion, shared, and *-api crates. A host wires it in; a core or a render crate reaches effects through a trait, not a dependency."
+        }
         "core-imports-render" => "core is business logic; it must not know a UI exists.",
         _ => "see the allowed-edges table in [workspace.metadata.gabion].",
     }
@@ -65,7 +69,7 @@ pub fn check(graph: &Graph, cfg: &Config) -> Vec<Finding> {
                 "unclassified-crate",
                 &krate.name,
                 format!("`{}` is a workspace member gabion cannot classify (rel path `{}`)", krate.name, krate.rel_dir),
-                "name it *-api | *-core | *-render | *-shared | host-*, or list it in [workspace.metadata.gabion] framework-crates / effect-homes. An unclassified crate slips past the whole edge table.",
+                "name it *-api | *-core | *-render | *-shared | host-* | *-native, or list it in [workspace.metadata.gabion] framework-crates / effect-homes. An unclassified crate slips past the whole edge table.",
             ));
         }
         for dep in &krate.ws_deps {

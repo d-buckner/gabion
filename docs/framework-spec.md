@@ -99,8 +99,16 @@ are types-only and fast; cargo parallelizes small crates.
 | X-api            | gabion, shared, other features' *-api      |
 | X-core           | X-api, shared, other features' *-api   |
 | X-render         | X-api, other features' *-render (component composition), shared, gabion — NOT any *-core |
-| hosts            | all *-core + *-render (composition only)|
+| hosts            | all *-core + *-render (composition only), plus an effect home |
+| effect home      | gabion, shared, other features' *-api — never a *-core or a *-render |
 | shared           | gabion only — never any feature            |
+
+An effect home is where an app's own effects live: a pty, a serial port, a C
+library. gabion names one by the `-native` suffix or by a line in
+`[workspace.metadata.gabion] effect-homes`, and a host is an effect home too. It
+gets the effect bans lifted and it may not reach another feature's logic or UI, so
+wiring effects into a contract stays a host job. A crate named `host-native` is a
+host written in native code, not an effect home: the host test runs first.
 
 Cross-feature calls: todo-core may depend on billing-api and receive billing's
 client — in-process today, HTTP once the generated client is built (GAPS §4) —
