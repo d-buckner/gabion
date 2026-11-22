@@ -9,7 +9,9 @@
 //!
 //! - **Namespace wall (§5).** A `call` or `close` may only reach a stream this
 //!   connection already opened, and an op must belong to that stream's namespace.
-//!   One comparison against the open-stream registry, at the one place that has it.
+//!   One comparison against the open-stream registry, at the one place that has it,
+//!   and the record leaves the registry when the stream stops — a namespace whose
+//!   last stream is over is closed to `call` frames again.
 //! - **A refusal names its kind (§5).** The site that knows what went wrong
 //!   picks the `ErrorKind`, so an unknown op is `NotFound` here as it is over HTTP,
 //!   MCP and the CLI, and only a namespace nobody opened is `Forbidden`.
@@ -25,6 +27,7 @@
 //!   dropped socket cancels its producers rather than letting them run on.
 
 mod pump;
+mod registry;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -35,20 +38,10 @@ use gabion::frames::{Frame, StreamId};
 use gabion::ws::WsService;
 
 use pump::{fail, no_such_op, pump};
+use registry::{locked, Call, Registry};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-
-/// Take the open-stream registry. A panic in one connection's pump leaves the map
-/// intact, so there is nothing to reconstruct and dropping the connection would
-/// turn one panic into every later caller's mystery.
-fn locked(registry: &Arc<Mutex<Registry>>) -> std::sync::MutexGuard<'_, Registry> {
-    match registry.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
 
 /// How many frames may sit unwritten before a producer waits.
 ///
@@ -71,12 +64,12 @@ pub fn ws_router(services: Vec<Arc<dyn WsService>>) -> axum::Router {
 }
 
 #[derive(Clone)]
-struct Surface {
+pub(super) struct Surface {
     services: Vec<Arc<dyn WsService>>,
 }
 
 impl Surface {
-    fn find(&self, op: &str) -> Option<&Arc<dyn WsService>> {
+    pub(super) fn find(&self, op: &str) -> Option<&Arc<dyn WsService>> {
         self.services.iter().find(|s| s.serves(op))
     }
 }
@@ -145,36 +138,16 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
 
     // The socket is gone. Every producer on it is cancelled, including one that is
     // idle and would otherwise sit on a stream nobody is reading (§7.4).
-    cancel_all(&registry).await;
+    locked(&registry).cancel_all();
     drop(out);
     let _ = writer.await;
 }
 
-/// Streams this connection opened. The one record the namespace wall reads.
-#[derive(Default)]
-struct Registry {
-    open: HashMap<StreamId, Open>,
-    /// One ordered queue per namespace, so calls in a namespace keep arrival order.
-    namespaces: HashMap<String, mpsc::UnboundedSender<Call>>,
-}
-
-struct Open {
-    ns: String,
-    cancel: Cancel,
-}
-
-struct Call {
-    op: String,
-    input: Value,
-    ctx: Ctx,
-    id: StreamId,
-}
-
 /// Everything one frame handler needs about the connection it came in on.
-struct Conn<'a> {
-    surface: &'a Arc<Surface>,
-    registry: &'a Arc<Mutex<Registry>>,
-    out: &'a mpsc::Sender<Frame>,
+pub(super) struct Conn<'a> {
+    pub(super) surface: &'a Arc<Surface>,
+    pub(super) registry: &'a Arc<Mutex<Registry>>,
+    pub(super) out: &'a mpsc::Sender<Frame>,
 }
 
 /// Handle one client frame. `false` means the connection is over.
@@ -208,20 +181,14 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
         }
         Frame::Close { id } => {
             // Out of band: never queued behind a call still in flight.
-            let gone = locked(registry).open.remove(&id);
-            match gone {
-                Some(entry) => {
-                    entry.cancel.cancel();
-                }
-                None => {
-                    fail(
-                        out,
-                        id,
-                        ErrorKind::NotFound,
-                        &format!("stream {id} was not opened on this connection"),
-                    )
-                    .await;
-                }
+            if !locked(registry).close(id) {
+                fail(
+                    out,
+                    id,
+                    ErrorKind::NotFound,
+                    &format!("stream {id} was not opened on this connection"),
+                )
+                .await;
             }
             true
         }
@@ -234,54 +201,6 @@ async fn read_one(frame: Frame, conn: &Conn<'_>) -> bool {
             )
             .await;
             true
-        }
-    }
-}
-
-impl Registry {
-    /// The ordered queue for a namespace, only if a stream in it is already open.
-    ///
-    /// A queue lives for the connection, not for the streams in it. Retiring one
-    /// when its last stream closed would drop the calls already queued behind it:
-    /// a `close` ends one stream, and §7.1 promises the others their turn.
-    fn sender_for(&mut self, ns: &str, conn: &Conn<'_>) -> Option<mpsc::UnboundedSender<Call>> {
-        if !self.open.values().any(|o| o.ns == ns) {
-            return None;
-        }
-        if let Some(sender) = self.namespaces.get(ns) {
-            return Some(sender.clone());
-        }
-        let (sender, receiver) = mpsc::unbounded_channel();
-        self.namespaces.insert(ns.to_string(), sender.clone());
-        tokio::spawn(drain_calls(
-            receiver,
-            Arc::clone(conn.surface),
-            conn.out.clone(),
-        ));
-        Some(sender)
-    }
-}
-
-/// Calls for one namespace, in the order they arrived (§7.1).
-///
-/// Sequential within the namespace, and one task per namespace, so a slow op in one
-/// feature does not hold another's. Writing the reply is awaited here rather than
-/// spawned, or the second reply could reach the socket before the first.
-async fn drain_calls(
-    mut receiver: mpsc::UnboundedReceiver<Call>,
-    surface: Arc<Surface>,
-    out: mpsc::Sender<Frame>,
-) {
-    while let Some(call) = receiver.recv().await {
-        let frame = match surface.find(&call.op) {
-            Some(service) => match service.call(&call.ctx, &call.op, call.input).await {
-                Ok(ok) => Frame::Reply { id: call.id, ok },
-                Err(error) => Frame::Error { id: call.id, error },
-            },
-            None => no_such_op(call.id, &call.op),
-        };
-        if out.send(frame).await.is_err() {
-            return;
         }
     }
 }
@@ -314,57 +233,36 @@ async fn open(request: OpenRequest<'_>) {
     };
     let ns = service.ns().to_string();
     let cancel = Cancel::new();
-    // A second `open` under an id that is already live would replace the record
-    // and orphan the pump behind it: the first producer keeps writing items under
-    // an id the client now reads as the second stream's, and `Items` accepts any
-    // item whose id and namespace match, so the two cannot be told apart. A taken
-    // id is refused, the same rigour `close` applies to an unknown one.
-    if locked(registry).open.contains_key(&id) {
-        let error = gabion::error::WireError::new(
-            gabion::error::ErrorKind::Conflict,
-            format!("stream {id} is already open on this connection"),
-        );
-        let _ = out.send(Frame::Error { id, error }).await;
+    if !locked(registry).claim(id, ns.clone(), cancel.clone()) {
+        fail(
+            out,
+            id,
+            ErrorKind::Conflict,
+            &format!("stream {id} is already open on this connection"),
+        )
+        .await;
         return;
     }
-    locked(registry).open.insert(
-        id,
-        Open {
-            ns: ns.clone(),
-            cancel: cancel.clone(),
-        },
-    );
     let ctx = ctx.with_cancel(cancel);
     let started = service.open(&ctx, &op, input).await;
     let opened = match started {
         Ok(opened) => opened,
         Err(error) => {
             let _ = out.send(Frame::Error { id, error }).await;
-            locked(registry).open.remove(&id);
+            locked(registry).retire(id);
             return;
         }
     };
-    tokio::spawn(pump(id, ns, opened, ctx, out.clone()));
-}
-
-async fn cancel_all(registry: &Arc<Mutex<Registry>>) {
-    let open: Vec<Cancel> = locked(registry)
-        .open
-        .values()
-        .map(|o| o.cancel.clone())
-        .collect();
-    for cancel in open {
-        cancel.cancel();
-    }
-    locked(registry).open.clear();
+    tokio::spawn(pump(id, ns, opened, ctx, out.clone(), Arc::clone(registry)));
 }
 
 /// One ordinary op on a stream this connection already opened (§5).
 ///
 /// The namespace wall is one lookup here and nowhere else: the queue a call joins
-/// is the queue of the namespace that opened a stream on this connection. A call
-/// that names a namespace nobody opened has no queue, so it is refused rather than
-/// run — which is the whole of the isolation the design promises.
+/// is the queue of the namespace with a live stream on this connection. A call that
+/// names a namespace with no live stream has no queue, so it is refused rather than
+/// run — and the refusal names that namespace, because "that stream is over" and
+/// "you never opened this" are different answers a client acts on differently.
 async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<'_>) {
     let Conn { registry, out, .. } = *conn;
     let Some(ns) = Frame::op_namespace(&op) else {
@@ -390,7 +288,10 @@ async fn call(id: StreamId, op: String, input: Value, meta: &Value, conn: &Conn<
                 out,
                 id,
                 ErrorKind::Forbidden,
-                &format!("`{op}` is outside every namespace this connection opened"),
+                &format!(
+                    "`{op}` is outside every namespace this connection opened: \
+                     no stream in `{ns}` is live"
+                ),
             )
             .await;
         }

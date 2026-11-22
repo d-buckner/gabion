@@ -85,6 +85,20 @@ recorded in §7.
   (streaming.md §7). A unary call is still the gap.
 - **Scaffolding for a second host.** `gabion new` writes two and `gabion feature
   add`/`remove` manage features; there is no `gabion host add`.
+- **An open-ended listen op.** A stream's items come from a finite collection
+  (`stream::from_vec`) or from a capability, and no example op keeps producing after
+  its first burst: `checks.watch` replays the stored history and ends. That is now
+  load-bearing, because §5's wall admits a `call` only into a namespace with a
+  **live** stream, so a replay that ends closes the namespace and refuses the send
+  op §3's duplex feature is about. Two example tests prove that claim and are
+  ignored rather than deleted — `a_send_op_travels_on_the_connections_stream` and
+  `a_streaming_features_ordinary_ops_move_to_the_socket` in
+  `example/hosts/host-pulse-server/tests/ws.rs`. Closing it is four changes, not
+  one: a `stream::unfold` composition form in `gabion` (a core may compose, not
+  source — §8), a following `checks.watch`, and a bounded collection in the
+  generated conformance suite, the NDJSON CLI reader and the MCP progress pump,
+  each of which currently drains a stream to its end and so would hang on one that
+  never ends. Issue #74.
 - **A UI gallery.** Panels have per-component snapshots, but nothing renders them
   side by side for a visual review.
 

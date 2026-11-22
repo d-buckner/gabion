@@ -221,9 +221,11 @@ branch for `close`.
 
 **The namespace rule is a wall, not a convention**, and it is enforced at both
 ends. On the server: a frame may only address an op in the namespace of a stream
-the client already opened, and a client may only `close` a stream it opened
-itself — the server compares the frame's `op` namespace against the open-stream
-record for that `id` and refuses a mismatch by name. On the client: the generated
+that is **live** on this connection — the record leaves the registry when the pump
+stops stating the stream, so "a stream ended" closes the namespace again rather
+than leaving it open because it was opened once — and a client may only `close` a
+stream it opened itself. The server compares the frame's `op` namespace against
+the open-stream record for that `id` and refuses a mismatch by name. On the client: the generated
 code delivers an `item` frame only to the feature whose namespace it names, so a
 feature's code cannot listen to another feature's events even by accident. Two
 features on one page therefore cannot read each other's events or write into each
