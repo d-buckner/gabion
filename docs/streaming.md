@@ -397,7 +397,7 @@ class. `empty-core` and `no-wasm-proof` are unaffected: a core that returns
 | `mcp` (stdio) | One `notifications/progress` per item, then the final result. This needs `Server::handle` to take a sink: today it is `handle(&self, request: &str) -> Option<String>` — one request in, at most one response out — so it is a signature change that reaches both transports. Note the existing cancellation channel is *inbound*; streaming needs *outbound* notifications, which the current shape cannot express at all. |
 | `mcp` (`POST /mcp`) | **Refused at mount, with a named reason.** v1 has no SSE (spec §5) and one JSON answer cannot carry N items. This is the one place "every method reaches every surface" gets a written exception, and it must be a refusal an agent can read rather than a tool that returns something strange. |
 | `cli` | NDJSON on stdout, one item per line; exit code from the `end` or `error` frame. |
-| `conformance` | Stream cases collect items + termination + error and compare them across adapters, driven from `MockStreams`. |
+| `conformance` | Stream cases collect items + termination + error and compare them across adapters, driven from `MockStreams`. A listen op that fails before its first item is a case like any other, and every surface answers it as `{items: [], end: <error>}`: the MCP surface cannot answer a stream op with a bare value, so a bare error on one surface and a wrapped one on another is a disagreement about nothing. |
 
 ## 10. Requirements: added, kept with a limit, and free
 

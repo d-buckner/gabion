@@ -245,18 +245,22 @@ fn stream_arm(
             let in_proc = match svc.#id(&ctx, input.clone()).await {
                 ::core::result::Result::Ok(stream) => ::gabion::conformance::stream_value(
                     ::gabion::conformance::collect(stream).await,
-                    "done",
+                    ::gabion::serde_json::json!("done"),
                 ),
-                ::core::result::Result::Err(e) => ::gabion::conformance::err_value(&e),
+                ::core::result::Result::Err(e) => {
+                    ::gabion::conformance::stream_refused(::gabion::conformance::err_value(&e))
+                }
             };
             let cli = #cli;
             let mcp_out = #mcp;
             let over_http = match client.#id(&ctx, input.clone()).await {
                 ::core::result::Result::Ok(stream) => ::gabion::conformance::stream_value(
                     ::gabion::conformance::collect(stream).await,
-                    "done",
+                    ::gabion::serde_json::json!("done"),
                 ),
-                ::core::result::Result::Err(e) => ::gabion::conformance::err_value(&e),
+                ::core::result::Result::Err(e) => {
+                    ::gabion::conformance::stream_refused(::gabion::conformance::err_value(&e))
+                }
             };
             (in_proc, cli, mcp_out, over_http)
         }
@@ -287,7 +291,9 @@ fn stream_cli(
                                 ::gabion::conformance::ndjson_value(&text)
                             }
                             ::core::result::Result::Err(exit) => {
-                                ::gabion::conformance::wire_value(&exit.wire)
+                                ::gabion::conformance::stream_refused(
+                                    ::gabion::conformance::wire_value(&exit.wire),
+                                )
                             }
                         }
                     }
