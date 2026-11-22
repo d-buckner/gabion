@@ -31,15 +31,18 @@ mod cli;
 mod client;
 mod conformance;
 mod mcp;
+mod naming;
 mod registry;
 mod server;
 mod streams;
 mod ws;
+
 use attrs::async_trait_attrs;
 use cli::gen_cli;
 use client::gen_client;
 use conformance::gen_conformance;
 use mcp::gen_mcp;
+pub(crate) use naming::{route, to_snake, tool_name};
 use registry::gen_registry;
 use server::gen_server;
 use streams::{read_return, Policy};
@@ -82,22 +85,6 @@ impl Method {
     pub(crate) fn has_post_route(&self) -> bool {
         self.stream.is_none()
     }
-}
-
-/// The route a method is served on: `POST /api/todo.create`.
-///
-/// The spec's wire decision (spec §5) is one POST per method, dotted under
-/// `/api`, and this is the only place it is computed — so the router and the
-/// OpenAPI document cannot disagree about it.
-pub(crate) fn route(ns: &str, m: &Method) -> String {
-    format!("/api/{}", tool_name(ns, m))
-}
-
-/// The operation's name without a transport in it: `todo.create`. The route is
-/// this under `/api`, and the MCP tool is this exactly, so a client reading the
-/// OpenAPI document and an agent reading `tools/list` name the same operation.
-pub(crate) fn tool_name(ns: &str, m: &Method) -> String {
-    format!("{ns}.{}", m.snake)
 }
 
 /// Everything the code generators need, precomputed from the trait.
@@ -159,35 +146,6 @@ fn reject_service_args(attr: &proc_macro2::TokenStream) -> syn::Result<()> {
          every surface. An op that must not be remote belongs in a plain \
          non-#[service] trait, not in this one.",
     ))
-}
-
-/// `TodoId` -> `todo_id`, `HTTPApi` -> `http_api`.
-///
-/// A run of capitals is one word, so the break goes before its *last* capital —
-/// the one that starts the next word — not before every capital. The namespace
-/// this produces is not cosmetic: it is the route prefix, the MCP tool prefix,
-/// the `ns` on every frame and the stream-wall key, so `HTTPService` becoming
-/// `h_t_t_p` would be a wire surface nobody can type.
-///
-/// Digits are not letters: they neither open a word nor close one, which keeps
-/// `H2O` at `h2_o` and `Todo2` at `todo2`.
-fn to_snake(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    let mut prev: Option<char> = None;
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        let starts_word_after_capitals = prev.is_some_and(char::is_uppercase)
-            && chars.peek().is_some_and(|next| next.is_lowercase());
-        let starts_word = c.is_uppercase()
-            && prev.is_some()
-            && (!prev.is_some_and(char::is_uppercase) || starts_word_after_capitals);
-        if starts_word {
-            out.push('_');
-        }
-        out.push(c.to_ascii_lowercase());
-        prev = Some(c);
-    }
-    out
 }
 
 fn expand(input: ItemTrait) -> syn::Result<proc_macro2::TokenStream> {
