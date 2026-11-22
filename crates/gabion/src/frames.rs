@@ -16,6 +16,13 @@ use serde_json::Value;
 /// Opaque to the transport and chosen by whoever opened the stream. One
 /// connection carries every feature's streams, so the id plus the namespace is
 /// what the open-stream record is keyed by (§5).
+///
+/// `StreamId(0)` is reserved for a frame that belongs to no stream of its own.
+/// The one frame that can arrive without an id anyone chose — a frame that will
+/// not parse — is answered under it, because there is no id to name. A client
+/// therefore numbers its streams from 1, leaving `0` free to mean "no stream";
+/// `Connection` already does. An error under `0` is a refusal of the frame, and
+/// never an answer about a stream the client owns.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]

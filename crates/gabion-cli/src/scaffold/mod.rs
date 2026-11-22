@@ -192,10 +192,15 @@ pub fn app(name: &str, gabion_path: Option<&Path>, cfg: &Config) -> Scaffold {
 
 /// The three crates of one more feature, for `gabion feature add`.
 ///
+/// No `Config`: a feature carries no thresholds of its own. Its manifests opt into
+/// `[workspace.lints]` and inherit the app's `clippy.toml`, both of which the app
+/// scaffold already tuned, so a parameter here would promise a per-feature
+/// configuration this function has nowhere to put.
+///
 /// The lock and the workspace members are the caller's job: the members list is
 /// an edit to a file the app owns, and the lock is the app's reviewed artifact.
 #[must_use]
-pub fn feature(name: &str, feature: &str, cfg: &Config) -> Scaffold {
+pub fn feature(name: &str, feature: &str) -> Scaffold {
     let mut scaffold = Scaffold::new();
     let svc = svc_name(feature);
     let fill = |body: &str| {
@@ -203,7 +208,6 @@ pub fn feature(name: &str, feature: &str, cfg: &Config) -> Scaffold {
             .replace("%FEATURE%", feature)
             .replace("%SVC%", &svc)
     };
-    let _ = cfg;
     for (suffix, manifest, lib) in [
         ("api", templates::API_MANIFEST, templates::API_LIB),
         ("core", templates::CORE_MANIFEST, templates::CORE_LIB),

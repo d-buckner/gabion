@@ -199,11 +199,24 @@ fn stop(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// `--run` verbatim (through the shell, so a pipeline works), or `cargo run -p` on
-/// the chosen host.
+/// `--run` split on whitespace and spawned directly, or `cargo run -p` on the
+/// chosen host.
+///
+/// Directly rather than through `sh -c`: the framework's premise is one codebase on
+/// every surface, and there is no `sh` on Windows, so a dev loop that hands its
+/// command to a shell cannot start on one of them. The cost is that a pipeline
+/// (`--run "a | b"`) is no longer a command — a flat list of program and arguments
+/// is all this spawns, and a developer who needs a pipeline puts it in a script.
 fn command_for(opts: &Options) -> Result<(String, Vec<String>), String> {
     if let Some(run) = &opts.run {
-        return Ok(("sh".to_string(), vec!["-c".to_string(), run.clone()]));
+        let mut words = run.split_whitespace();
+        let program = words
+            .next()
+            .ok_or_else(|| "--run needs a command to run".to_string())?;
+        return Ok((
+            program.to_string(),
+            words.map(ToString::to_string).collect(),
+        ));
     }
     let cfg = Config::load(&opts.root)?;
     let graph = graph::load(&opts.root, &cfg)?;
@@ -232,6 +245,28 @@ mod tests {
         std::fs::write(dir.path().join("b.rs"), "// new").expect("write");
         let files = watched_files(dir.path());
         assert!(changed_since(&files, since));
+    }
+
+    /// `--run` is split and spawned directly. There is no `sh` on every surface
+    /// gabion targets, and a dev loop that cannot start on one of them is not one
+    /// codebase on every surface. The cost is a pipeline in `--run`, which a
+    /// developer who needs one puts in a script.
+    #[test]
+    fn a_run_command_is_spawned_directly_rather_than_through_a_shell() {
+        let mut opts = Options::new(".");
+        opts.run = Some("cargo run -p demo-host".to_string());
+        assert_eq!(
+            command_for(&opts).expect("a command"),
+            (
+                "cargo".to_string(),
+                vec!["run".to_string(), "-p".to_string(), "demo-host".to_string()]
+            )
+        );
+        opts.run = Some("   ".to_string());
+        assert!(
+            command_for(&opts).is_err(),
+            "a `--run` that names no program is not a shell either"
+        );
     }
 
     #[test]

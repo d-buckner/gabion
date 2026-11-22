@@ -25,6 +25,12 @@ pub enum ErrorKind {
     Forbidden,
     /// A deadline arrived. A stream that cannot progress and hits its app-level
     /// deadline lands here, never in `Internal`.
+    ///
+    /// 408 *Request Timeout* is borrowed deliberately: in HTTP it names a slow
+    /// *client*, where a late origin is 503 or 504. Every kind must own one number
+    /// on every surface (`no_two_kinds_share_a_number_on_any_surface`), a deadline
+    /// already has its own MCP code and exit code, and 408 is the closest status no
+    /// other kind speaks for.
     Timeout,
     Internal,
 }

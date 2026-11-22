@@ -25,6 +25,10 @@ pub use std::task::{Context, Poll};
 pub use std::time::Duration;
 pub use tokio::time::Instant;
 
+// The raw-socket helpers below use the sink and stream halves the way the transport
+// does; nothing else in the suites needs them in scope.
+use futures_util::{SinkExt as _, StreamExt as _};
+
 /// How many items a feature's stream gives before it ends on its own.
 pub const FOREVER: usize = usize::MAX;
 
@@ -220,6 +224,43 @@ pub async fn serve_with(
 
 pub fn client(base: &str) -> Connection<WsStreams> {
     Connection::new(format!("{base}/api/ws"), WsStreams)
+}
+
+/// A socket this test writes frames on by hand, for the frames `Connection` will
+/// not write: a frame that does not parse, or a second `open` under an id it picks
+/// for itself.
+pub type Raw =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+pub async fn raw(base: &str) -> Raw {
+    let url = format!("{}/api/ws", base.replacen("http://", "ws://", 1));
+    let (socket, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("a raw socket to the host");
+    socket
+}
+
+pub async fn send_raw(socket: &mut Raw, frame: Frame) {
+    let text = serde_json::to_string(&frame).expect("serialize");
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .await
+        .expect("the write lands");
+}
+
+/// One text frame off the raw socket, skipped past the frames that are not gabion
+/// framing. A socket that ends first is a panic: every test here is waiting on a
+/// frame the server promised.
+pub async fn next_raw(socket: &mut Raw) -> Frame {
+    loop {
+        match socket.next().await {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
+                return serde_json::from_str(&text).expect("a gabion frame");
+            }
+            Some(Ok(_)) => continue,
+            other => panic!("the socket ended before a frame: {other:?}"),
+        }
+    }
 }
 
 /// Read one stream to its terminator: the items, and how it ended.

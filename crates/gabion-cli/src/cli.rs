@@ -299,6 +299,9 @@ gabion — one business core, every surface
                       and re-run; what is left needs a decision
   --allow-missing-tools  report a missing cargo-shear/cargo-deny as a named SKIP
                       instead of a failure. Never silent: the summary counts them.
+  --run CMD           what `gabion dev` runs instead of `cargo run -p <host>`:
+                      a program and its arguments, spawned directly. There is no
+                      shell, so a pipeline is not a command — put it in a script.
 ";
     eprint!("{text}");
     Summary::silent()
