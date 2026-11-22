@@ -52,7 +52,14 @@ pub(crate) fn gen_registry(c: &Contract) -> proc_macro2::TokenStream {
         }
     };
     let ops: Vec<String> = c.methods.iter().map(|m| tool_name(ns, m)).collect();
-    let routes: Vec<String> = c.methods.iter().map(|m| route(ns, m)).collect();
+    // The same predicate the router registers routes with: a listen op has no
+    // POST route to advertise.
+    let routes: Vec<String> = c
+        .methods
+        .iter()
+        .filter(|m| m.has_post_route())
+        .map(|m| route(ns, m))
+        .collect();
 
     quote! {
         #[cfg(feature = "registry")]

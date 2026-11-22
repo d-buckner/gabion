@@ -43,7 +43,11 @@ pub struct Surfaces {
     pub trait_name: &'static str,
     /// Every reachable operation, dotted: `todo.create`.
     pub ops: &'static [&'static str],
-    /// Every route the `server` feature serves, in trait order.
+    /// Every `POST /api/<ns>.<op>` route the `server` feature serves, in trait
+    /// order. A listen op is not here: it is served on `GET /api/ws`
+    /// (docs/streaming.md §5) and named in the OpenAPI document's
+    /// `x-gabion-streams`, not on a route of its own. [`Host::exposed_routes`]
+    /// reads this list.
     pub routes: &'static [&'static str],
     /// `Some` when the api crate was built with the `server` feature.
     pub router: Option<Box<dyn Any + Send>>,
@@ -102,6 +106,22 @@ impl Host {
     #[must_use]
     pub fn exposed(&self) -> Vec<&'static str> {
         let mut out: Vec<&'static str> = self.mounted.iter().flat_map(|m| m.ops).copied().collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Every `POST /api/<ns>.<op>` route this host serves, sorted — the HTTP half
+    /// of [`Host::exposed`], for a host that logs what it exposes. A listen op is
+    /// absent because it is served on `GET /api/ws`, which is one endpoint for
+    /// the whole host rather than a per-op route.
+    #[must_use]
+    pub fn exposed_routes(&self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = self
+            .mounted
+            .iter()
+            .flat_map(|m| m.routes)
+            .copied()
+            .collect();
         out.sort_unstable();
         out
     }

@@ -138,12 +138,14 @@ incidents.mount_on(&mut host);
 let app = gabion_native::host_router(&mut host);
 ```
 
-`Host::mounted()` / `contracts()` / `exposed()` make what a running process serves
-an artifact a test can pin. The original plan here was a `linkme` distributed
-slice; it was built and measured **empty** in a real host binary (the linker is
-free to drop the object file holding an rlib static), which is the fail-open class
-GAPS §1 bans, so the linker is not involved. The method version also works on
-wasm, which the slice version could not (GAPS §7).
+`Host::mounted()` / `contracts()` / `exposed()` / `exposed_routes()` make what a
+running process serves an artifact a test can pin. `exposed()` names every
+operation; `exposed_routes()` names only the `POST /api/<ns>.<op>` routes, because
+a listen op is served on `GET /api/ws` instead. The original plan here was a
+`linkme` distributed slice; it was built and measured **empty** in a real host
+binary (the linker is free to drop the object file holding an rlib static), which
+is the fail-open class GAPS §1 bans, so the linker is not involved. The method
+version also works on wasm, which the slice version could not (GAPS §7).
 
 What runtime registration cannot see is an *absent* call, so `gabion check` owns
 that direction: `unserved-contract` fails when a `#[service]` trait is named by no
