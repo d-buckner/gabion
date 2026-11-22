@@ -89,7 +89,9 @@ pub(crate) fn tool_name(ns: &str, m: &Method) -> String {
 
 /// Everything the code generators need, precomputed from the trait.
 pub(crate) struct Contract {
-    /// Trait name minus the `Service` suffix, snake_cased: `todo`.
+    /// Trait name minus the `Service` suffix, snake_cased: `Todo` -> `todo`,
+    /// `HTTP` -> `http`. A run of capitals is one word, because this string is
+    /// the route prefix and the tool prefix, not a display name.
     pub(crate) ns: String,
     /// Trait name minus the `Service` suffix, spelled as written: `Todo`. The
     /// generated client is `TodoClient`.
@@ -146,13 +148,31 @@ fn reject_service_args(attr: &proc_macro2::TokenStream) -> syn::Result<()> {
     ))
 }
 
+/// `TodoId` -> `todo_id`, `HTTPApi` -> `http_api`.
+///
+/// A run of capitals is one word, so the break goes before its *last* capital —
+/// the one that starts the next word — not before every capital. The namespace
+/// this produces is not cosmetic: it is the route prefix, the MCP tool prefix,
+/// the `ns` on every frame and the stream-wall key, so `HTTPService` becoming
+/// `h_t_t_p` would be a wire surface nobody can type.
+///
+/// Digits are not letters: they neither open a word nor close one, which keeps
+/// `H2O` at `h2_o` and `Todo2` at `todo2`.
 fn to_snake(s: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() && i > 0 {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut prev: Option<char> = None;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        let starts_word_after_capitals = prev.is_some_and(char::is_uppercase)
+            && chars.peek().is_some_and(|next| next.is_lowercase());
+        let starts_word = c.is_uppercase()
+            && prev.is_some()
+            && (!prev.is_some_and(char::is_uppercase) || starts_word_after_capitals);
+        if starts_word {
             out.push('_');
         }
         out.push(c.to_ascii_lowercase());
+        prev = Some(c);
     }
     out
 }

@@ -183,8 +183,9 @@ streams were one-way reads.
 Multiplexing is deliberately not a protocol project. One connection, one frame
 envelope, and the unit of separation is the **feature namespace** — which the
 macro already computes (`Contract::ns`: the trait name minus `Service`,
-snake_cased; the same string that spells `route()` and the MCP tool name). No new
-naming scheme is introduced.
+snake_cased — `TodoService` is `todo`, `HTTPService` is `http`, because a run of
+capitals is one word; the same string that spells `route()` and the MCP tool
+name). No new naming scheme is introduced.
 
 Frames, both directions, one JSON object each:
 
