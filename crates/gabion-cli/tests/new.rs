@@ -248,14 +248,16 @@ fn dev_once_runs_the_command_and_reports_its_status() {
     let (failed, code) = cli::run(&[
         "dev".to_string(),
         "--once".to_string(),
+        // `false` rather than `exit 1`: `--run` is spawned directly, not through a
+        // shell, so a shell builtin is not a command.
         "--run".to_string(),
-        "exit 3".to_string(),
+        "false".to_string(),
         "--root".to_string(),
         root,
     ]);
     assert!(!failed.ok(), "a non-zero child must fail the command");
     assert_eq!(code, std::process::ExitCode::FAILURE);
-    assert!(failed.failed_steps.iter().any(|s| s.contains("exited 3")));
+    assert!(failed.failed_steps.iter().any(|s| s.contains("exited 1")));
 }
 
 /// `gabion feature remove` takes back the crates, the members, and the published

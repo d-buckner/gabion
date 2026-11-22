@@ -35,7 +35,7 @@
           },
           {
             "const": "timeout",
-            "description": "A deadline arrived. A stream that cannot progress and hits its app-level\ndeadline lands here, never in `Internal`.",
+            "description": "A deadline arrived. A stream that cannot progress and hits its app-level\ndeadline lands here, never in `Internal`.\n\n408 *Request Timeout* is borrowed deliberately: in HTTP it names a slow\n*client*, where a late origin is 503 or 504. Every kind must own one number\non every surface (`no_two_kinds_share_a_number_on_any_surface`), a deadline\nalready has its own MCP code and exit code, and 408 is the closest status no\nother kind speaks for.",
             "type": "string"
           }
         ]

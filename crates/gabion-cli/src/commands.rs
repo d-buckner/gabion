@@ -105,7 +105,7 @@ pub fn add_feature(opts: &FeatureOptions) -> Summary {
             feature_dir.display()
         ));
     }
-    let scaffold = crate::scaffold::feature(&name, &opts.name, &crate::config::Config::default());
+    let scaffold = crate::scaffold::feature(&name, &opts.name);
     let members: Vec<String> = ["api", "core", "render"]
         .iter()
         .map(|suffix| format!("features/{}/{}-{suffix}", opts.name, opts.name))

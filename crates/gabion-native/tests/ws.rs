@@ -89,6 +89,65 @@ async fn a_client_may_not_close_a_stream_it_did_not_open() {
 }
 
 #[tokio::test]
+async fn a_second_open_under_a_live_id_is_refused() {
+    // The stream must still be running when the second `open` arrives, or the id is
+    // free again and there is nothing to collide with. A slow tick means the first
+    // pump is parked rather than finished.
+    let alpha = Arc::new(Feature::open_ended("alpha", Duration::from_millis(100)));
+    let (base, _, _) = serve_with(alpha, Arc::new(Feature::new("beta", 2))).await;
+    let mut socket = raw(&base).await;
+    let live = StreamId(7);
+    send_raw(
+        &mut socket,
+        Frame::open(live, "alpha.watch", Value::Null, &Ctx::anonymous()),
+    )
+    .await;
+    // The first stream is answering under this id, so the id is taken.
+    match next_raw(&mut socket).await {
+        Frame::Item { id, ns, .. } => {
+            assert_eq!(id, live);
+            assert_eq!(ns, "alpha", "the live stream is alpha's");
+        }
+        other => panic!("the first stream must produce an item, got {other:?}"),
+    }
+    // A second `open` under the same id used to replace the record and orphan the
+    // pump behind it: two producers writing items under one id, indistinguishable
+    // to the client. A taken id is refused, the way an unknown id is on `close`.
+    send_raw(
+        &mut socket,
+        Frame::open(live, "beta.watch", Value::Null, &Ctx::anonymous()),
+    )
+    .await;
+    loop {
+        match next_raw(&mut socket).await {
+            Frame::Item { id, ns, .. } => assert_eq!(
+                (id, ns.as_str()),
+                (live, "alpha"),
+                "only the first stream may write under the id"
+            ),
+            Frame::Error { id, error } => {
+                assert_eq!(id, live);
+                assert_eq!(error.kind, ErrorKind::Conflict, "got: {error:?}");
+                assert!(
+                    error.message.contains('7'),
+                    "the refusal must name the id, got: {}",
+                    error.message
+                );
+                break;
+            }
+            other => panic!("a second open must be refused, got {other:?}"),
+        }
+    }
+    // And the stream that owns the id is unharmed: its pump still writes.
+    match next_raw(&mut socket).await {
+        Frame::Item { id, ns, .. } => {
+            assert_eq!((id, ns.as_str()), (live, "alpha"));
+        }
+        other => panic!("the first pump was clobbered by the second open: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn two_sends_keep_their_order_on_one_connection() {
     let (base, _, _) = serve().await;
     let conn = client(&base);

@@ -260,6 +260,8 @@ impl<S: Streams> Connection<S> {
 
     fn reserve(&self) -> StreamId {
         let mut inner = lock(&self.inner);
+        // From 1: `StreamId(0)` is the no-stream id an unparseable frame is
+        // answered under, so no stream this client opens may claim it.
         let id = StreamId(inner.next_id);
         inner.next_id += 1;
         id

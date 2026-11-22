@@ -110,6 +110,9 @@ async fn serve(socket: WebSocket, surface: Arc<Surface>) {
                 let frame = match gabion::serde_json::from_str::<Frame>(&text) {
                     Ok(frame) => frame,
                     Err(e) => {
+                        // `StreamId(0)` is the no-stream id: the id the client would
+                        // have named is exactly what failed to parse, and `0` is the
+                        // one number a client never opens a stream under.
                         fail(&out, StreamId(0), &format!("frame would not parse: {e}")).await;
                         break;
                     }
@@ -305,6 +308,19 @@ async fn open(request: OpenRequest<'_>) {
     };
     let ns = service.ns().to_string();
     let cancel = Cancel::new();
+    // A second `open` under an id that is already live would replace the record
+    // and orphan the pump behind it: the first producer keeps writing items under
+    // an id the client now reads as the second stream's, and `Items` accepts any
+    // item whose id and namespace match, so the two cannot be told apart. A taken
+    // id is refused, the same rigour `close` applies to an unknown one.
+    if locked(registry).open.contains_key(&id) {
+        let error = gabion::error::WireError::new(
+            gabion::error::ErrorKind::Conflict,
+            format!("stream {id} is already open on this connection"),
+        );
+        let _ = out.send(Frame::Error { id, error }).await;
+        return;
+    }
     locked(registry).open.insert(
         id,
         Open {
