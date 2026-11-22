@@ -322,6 +322,12 @@ The house rules, from [the spec](docs/framework-spec.md) and
 The canonical remote is [GitHub](https://github.com/d-buckner/gabion), and GitHub
 Actions is what enforces the wall.
 
+Releases go out with `scripts/publish.sh`: it re-runs the gate, publishes the five
+crates dependencies-first, waits for the index to agree, then tags. It carries no
+credential — `cargo publish` uses your own `cargo login`, the script refuses to
+print anything token-shaped, and it fails its own self-audit if a token literal
+ever lands in the file. `--dry-run` shows what a release would do.
+
 ## Docs
 
 - [docs/framework-spec.md](docs/framework-spec.md) — the signed-off decisions
