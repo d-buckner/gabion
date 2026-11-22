@@ -5,6 +5,12 @@
 //! a frame asks for one and the frame is routed to whoever it belongs to. That is
 //! why a stalled `Each` subscriber stalls the connection instead of a queue: the
 //! documented limit of §5, made visible rather than buffered away.
+//!
+//! One reader drains the shared read side for *every* stream id, so a stream nobody
+//! is reading would otherwise grow a queue for as long as another stream keeps the
+//! socket moving. [`queues`] bounds it, and the id that fell behind is told so by
+//! name rather than buffered — the same choice the codec makes for an item that will
+//! not parse.
 
 use crate::caps::{Channel, HttpRequest, StreamError, Streams};
 use crate::channel::Items;
@@ -12,12 +18,15 @@ use crate::ctx::Ctx;
 use crate::error::{ErrorKind, FromWire, WireError};
 use crate::frames::{Frame, StreamId};
 use crate::stream::{next, BoxStream, EndReason, Stream};
+use queues::Queues;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::task::{Context as PollContext, Poll, Waker};
+use std::task::{Context as PollContext, Poll};
+
+mod queues;
 
 /// One connection to one host, shared by every stream and every `call` of the
 /// features that opened them.
@@ -34,11 +43,9 @@ pub struct Connection<S: Streams> {
 struct Inner {
     channel: Option<Channel>,
     frames: Option<BoxStream<'static, Result<Frame, StreamError>>>,
-    /// Frames that arrived for a stream nobody has taken yet.
-    queues: HashMap<StreamId, VecDeque<Frame>>,
-    /// One consumer per stream id, so a frame wakes its own reader and nobody
-    /// else's.
-    waiting: HashMap<StreamId, Waker>,
+    /// Frames that arrived for each stream nobody has taken yet, and the readers
+    /// waiting for one.
+    queues: Queues,
     /// The failure that ended the read side, once there was one.
     dead: Option<WireError>,
     /// Which namespace each live stream belongs to, and how many are live in each.
@@ -68,8 +75,7 @@ impl<S: Streams> Connection<S> {
             inner: Arc::new(Mutex::new(Inner {
                 channel: None,
                 frames: None,
-                queues: HashMap::new(),
-                waiting: HashMap::new(),
+                queues: Queues::default(),
                 dead: None,
                 live: HashMap::new(),
                 per_ns: HashMap::new(),
@@ -174,11 +180,7 @@ impl<S: Streams> Connection<S> {
         if let Frame::Error { error, .. } = first {
             return Err(error);
         }
-        lock(&self.inner)
-            .queues
-            .entry(id)
-            .or_default()
-            .push_front(first);
+        lock(&self.inner).queues.restore(id, first);
         Ok(Box::pin(Items::new(id, ns, Box::pin(receiver))))
     }
 
@@ -295,7 +297,11 @@ impl Receiver {
 /// side back up and route what is waiting.
 impl Drop for Receiver {
     fn drop(&mut self) {
-        let waiting: Vec<Waker> = lock(&self.inner).waiting.drain().map(|(_, w)| w).collect();
+        let mut inner = lock(&self.inner);
+        // The failure nobody is left to read is not owed to anyone.
+        inner.queues.forget(self.id);
+        let waiting = inner.queues.waiting();
+        drop(inner);
         for waker in waiting {
             waker.wake();
         }
@@ -309,7 +315,9 @@ impl Stream for Receiver {
         let this = self.get_mut();
         let mut inner = lock(&this.inner);
         loop {
-            if let Some(frame) = inner.queues.get_mut(&this.id).and_then(VecDeque::pop_front) {
+            // Owed before anything queued: a stream that fell behind has had its
+            // queue cleared, and this is the one frame its reader will get.
+            if let Some(frame) = inner.queues.take(this.id) {
                 return Poll::Ready(Some(Ok(frame)));
             }
             if let Some(error) = &inner.dead {
@@ -317,7 +325,7 @@ impl Stream for Receiver {
             }
             match route(&mut inner, cx) {
                 Read::Pending => {
-                    inner.waiting.insert(this.id, cx.waker().clone());
+                    inner.queues.park(this.id, cx.waker().clone());
                     return Poll::Pending;
                 }
                 Read::Dead(why) => {
@@ -354,19 +362,23 @@ fn route(inner: &mut Inner, cx: &mut PollContext<'_>) -> Read {
         Poll::Ready(None) => Read::Dead("the connection closed without an end".into()),
         Poll::Ready(Some(Err(e))) => Read::Dead(e.to_string()),
         Poll::Ready(Some(Ok(frame))) => {
-            let target = frame.id();
             if matches!(frame, Frame::End { .. } | Frame::Error { .. }) {
-                if let Some(ns) = inner.live.remove(&target) {
-                    if let Some(count) = inner.per_ns.get_mut(&ns) {
-                        *count = count.saturating_sub(1);
-                    }
-                }
+                unlive(inner, frame.id());
             }
-            inner.queues.entry(target).or_default().push_back(frame);
-            if let Some(waker) = inner.waiting.remove(&target) {
-                waker.wake();
-            }
+            inner.queues.hold(frame);
             Read::Taken
+        }
+    }
+}
+
+/// A stream that stated its ending is no longer live in its namespace.
+///
+/// The count decides whether an ordinary op of that feature goes over the
+/// connection at all (§5), so an end has to be recorded wherever it is first seen.
+fn unlive(inner: &mut Inner, id: StreamId) {
+    if let Some(ns) = inner.live.remove(&id) {
+        if let Some(count) = inner.per_ns.get_mut(&ns) {
+            *count = count.saturating_sub(1);
         }
     }
 }

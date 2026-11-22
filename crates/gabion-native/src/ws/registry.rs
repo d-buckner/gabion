@@ -7,10 +7,13 @@
 //!   its `open` frame arrives and leaves it the moment its pump stops stating the
 //!   stream — so "a stream in this namespace is live" is what a `call` is checked
 //!   against, never "this namespace was opened once".
-//! - `namespaces` holds one ordered queue per namespace for the life of the
-//!   connection. It outlives every stream in it on purpose: retiring a queue when
+//! - `namespaces` holds one ordered, bounded queue per namespace for the life of
+//!   the connection. It outlives every stream in it on purpose: retiring a queue when
 //!   its last stream ended would drop the calls already queued behind it, which is
 //!   §7.1's promise to take their turn.
+//! - A full queue is a refusal, not growth ([`CALL_QUEUE`]): the read loop cannot
+//!   wait for room without also waiting behind the `close` it alone can answer, so the
+//!   call that does not fit is answered with `Internal` and the client can retry.
 
 use gabion::ctx::{Cancel, Ctx};
 use gabion::frames::{Frame, StreamId};
@@ -31,12 +34,22 @@ pub(crate) fn locked(registry: &Arc<Mutex<Registry>>) -> MutexGuard<'_, Registry
     }
 }
 
+/// How many calls may wait for one namespace's queue before the next is refused.
+///
+/// Bounded by the same doctrine as the write queue: a client that sends `call`
+/// frames faster than one `drain_calls` task runs them would otherwise grow this
+/// queue for the life of the connection (§5). The read loop cannot wait for room —
+/// it is also the only place a `close` is handled, so a wait here would keep a
+/// producer that could be cancelled running (§7.4) — so a call that does not fit is
+/// refused with `Internal` instead of being queued or dropped silently.
+pub(super) const CALL_QUEUE: usize = 64;
+
 /// Streams this connection opened. The one record the namespace wall reads.
 #[derive(Default)]
 pub(crate) struct Registry {
     open: HashMap<StreamId, Open>,
     /// One ordered queue per namespace, so calls in a namespace keep arrival order.
-    namespaces: HashMap<String, mpsc::UnboundedSender<Call>>,
+    namespaces: HashMap<String, mpsc::Sender<Call>>,
 }
 
 pub(crate) struct Open {
@@ -113,18 +126,14 @@ impl Registry {
     /// turn (§7.1), and a later `open` in that namespace rejoins the same queue, so
     /// arrival order survives a stream ending. Only a namespace with no live stream
     /// gets no queue, which is the refusal the wall exists for.
-    pub(crate) fn sender_for(
-        &mut self,
-        ns: &str,
-        conn: &Conn<'_>,
-    ) -> Option<mpsc::UnboundedSender<Call>> {
+    pub(crate) fn sender_for(&mut self, ns: &str, conn: &Conn<'_>) -> Option<mpsc::Sender<Call>> {
         if !self.open.values().any(|o| o.ns == ns) {
             return None;
         }
         if let Some(sender) = self.namespaces.get(ns) {
             return Some(sender.clone());
         }
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(CALL_QUEUE);
         self.namespaces.insert(ns.to_string(), sender.clone());
         tokio::spawn(drain_calls(
             receiver,
@@ -141,7 +150,7 @@ impl Registry {
 /// feature does not hold another's. Writing the reply is awaited here rather than
 /// spawned, or the second reply could reach the socket before the first.
 async fn drain_calls(
-    mut receiver: mpsc::UnboundedReceiver<Call>,
+    mut receiver: mpsc::Receiver<Call>,
     surface: Arc<Surface>,
     out: mpsc::Sender<Frame>,
 ) {

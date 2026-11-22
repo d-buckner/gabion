@@ -255,6 +255,7 @@ surface sends exactly these:
 | A `close` for a `StreamId` this connection never opened | `NotFound` |
 | A frame only the server may send (`item`, `reply`, `end`, `error`) | `InvalidInput` |
 | A second `open` under an id already live | `Conflict` |
+| A `call` whose namespace queue is already full | `Internal` |
 
 The middle pair is the one worth keeping apart. An unknown op is `NotFound` on
 every surface — HTTP, MCP, the CLI and here — and only a namespace the connection
@@ -279,6 +280,30 @@ waits. That is not solved here, and it is not hidden either:
   that says otherwise, which is the silent default the house rule bans. If a
   bounded overflow policy is ever wanted, it arrives as a third marker, spelled
   out in the signature.
+
+**Every queue on the path is bounded, and here is where.** The doctrine is the same
+in all four places — a queue that grows turns an `Each` promise into memory growth —
+so each one has a number and a named outcome rather than a hedge:
+
+| Queue | Bound | What happens at the bound |
+| --- | --- | --- |
+| Server, frames waiting to be written | 64 (`WRITE_QUEUE`) | the producer waits; a refusal goes into a task of its own instead of the reader waiting |
+| Server, `call`s waiting for one namespace | 64 (`CALL_QUEUE`) | the call is refused with `Internal`; it is neither queued nor dropped silently |
+| Client transport, frames waiting to be read off the socket | 64 (`READ_QUEUE`) | the pump stops reading the socket, so the peer's write queue backs up — a frame is never dropped |
+| Client connection, frames waiting for one stream's reader | 64 (`STREAM_QUEUE`) | that stream's queue is cleared and its reader gets `error` `Internal: this stream fell behind`; later frames for that id are dropped |
+
+The `call` queue refuses rather than waiting for room because the wait would happen
+in the read loop, which is also the only place a `close` is answered — a producer
+that could have been cancelled would keep running behind a full queue (§7.4).
+`Internal` is the kind for a limit gabion imposed on itself, not for the app's
+failure, and the message names the queue so a client can tell it from a slow op.
+
+The last row is the only place gabion drops frames, and it drops them for the id
+that could not keep up, never for the one that could: one reader drains the shared
+socket for every stream on the connection, so without a bound one parked consumer's
+queue would grow while a busy one pumped. The failure is named because a client
+cannot act on items that silently stopped arriving, and `Internal` is the kind the
+codec already uses for the same class — an item that will not parse.
 
 What this costs, stated plainly:
 
@@ -369,7 +394,13 @@ The proposal's six, corrected and extended:
    violation (§5) is `Forbidden`; neither is reported as `Internal`, because S7 is
    about the client recovering a *named* kind. Each kind owns one HTTP status, one
    JSON-RPC code and one exit code (`gabion/src/error.rs`), so it round-trips through
-   `WireError` and `FromWire` instead of being flattened at the boundary.
+   `WireError` and `FromWire` instead of being flattened at the boundary. The queues
+   that carry this backpressure are bounded at **64** each — 64 frames unwritten on
+   the server, 64 calls per namespace, 64 frames unread on the native transport, 64
+   frames per stream on a client connection (§5). A `call` that finds its namespace
+   queue full is refused with `Internal`, and a client stream that falls more than 64
+   frames behind its reader gets `Internal: this stream fell behind`; those are the
+   two limits gabion reports rather than absorbs.
 4. **End of stream is explicit, and the framing must prove it.** A stream ends with
    an `end` frame (`done` / `cancelled`) or an `error` frame carrying a `WireError`.
    **A channel that dies without one of the three is a transport failure, not a
@@ -479,6 +510,9 @@ The proposal's list, corrected. Style: fixtures in
 | `stream_item_order_survives_all_adapters` | S2, per stream, per adapter. |
 | `a_conflating_stream_keeps_the_last_value` | S5, and that the newest is never dropped. |
 | `a_lossless_stream_blocks_instead_of_growing_without_bound` | S4 — driven by `MockStreams` with a stalled subscriber, so it is deterministic and spends no wall time. |
+| `a_stream_left_behind_by_a_faster_reader_fails_by_name_instead_of_growing` | §5's bounded per-stream queue: one reader drains the connection for every id, so an id nobody reads fails by name instead of growing. |
+| `a_namespace_saturated_with_calls_refuses_the_overflow_by_name` | §5's bounded call queue: the read loop refuses rather than waiting for room behind the `close` it alone answers. |
+| `a_burst_larger_than_the_read_queue_arrives_whole_and_in_order` | §5's bounded read side stops reading the socket; it never drops a frame. |
 | `a_frame_in_another_features_namespace_is_refused` | The namespace wall (§5), server side, with a named kind. |
 | `a_feature_never_receives_another_features_frames` | The same wall on the client: delivery is by namespace, not by whoever happens to be polling. |
 | `a_client_may_not_close_a_stream_it_did_not_open` | The other half of the same wall. |

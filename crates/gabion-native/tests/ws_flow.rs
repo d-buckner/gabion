@@ -36,3 +36,53 @@ async fn a_conflating_stream_keeps_the_last_value() {
         "the newest value must survive, saw {seen:?}"
     );
 }
+
+/// A namespace's call queue is bounded too (§5). The calls that do not fit are
+/// refused rather than queued or grown: the read loop cannot wait for room, because
+/// it is also the one place a `close` is answered (§7.4).
+///
+/// `Internal` is the kind for a limit gabion imposed on itself, and the message
+/// names the queue so a client can tell this from a slow op.
+#[tokio::test]
+async fn a_namespace_saturated_with_calls_refuses_the_overflow_by_name() {
+    const BURST: usize = 100;
+    // A stream that never ends keeps the namespace wall open for the whole burst.
+    let alpha = Arc::new(Feature::open_ended("alpha", Duration::from_millis(50)));
+    let (base, _, _) = serve_with(alpha, Arc::new(Feature::new("beta", 2))).await;
+    let conn = client(&base);
+    let _rx = conn
+        .open("alpha.watch", Value::Null, &Ctx::anonymous())
+        .await
+        .unwrap();
+    // Each op holds `drain_calls` for 15ms, so a burst this size cannot all fit in
+    // the queue plus the one in flight.
+    let mut tasks = Vec::new();
+    for _ in 0..BURST {
+        let conn = conn.clone();
+        tasks.push(tokio::spawn(async move {
+            conn.call("alpha.slow", json!({ "ms": 15 }), &Ctx::anonymous())
+                .await
+        }));
+    }
+    let mut ran = 0;
+    let mut refused = 0;
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(_) => ran += 1,
+            Err(e) => {
+                assert_eq!(e.kind, ErrorKind::Internal, "got: {e:?}");
+                assert!(
+                    e.message.contains("call queue is full"),
+                    "the refusal must say why: {}",
+                    e.message
+                );
+                refused += 1;
+            }
+        }
+    }
+    assert_eq!(ran + refused, BURST, "every call got one answer");
+    assert!(
+        refused > 0,
+        "a burst of {BURST} calls into a bounded queue must refuse the overflow: {ran} ran"
+    );
+}
