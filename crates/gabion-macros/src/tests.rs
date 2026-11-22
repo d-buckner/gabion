@@ -38,6 +38,52 @@ fn every_method_in_the_trait_reaches_every_surface() {
     assert!(out.contains("__h_list"), "no HTTP handler for list");
 }
 
+/// A run of capitals is one word, not one word per letter: `HTTPService` becomes
+/// the namespace `http`, not `h_t_t_p`. The namespace is the route prefix, the
+/// MCP tool prefix, the `ns` on every frame and the stream-wall key, so the
+/// spelling here decides what an HTTP client has to type.
+#[test]
+fn an_acronym_is_one_word_not_one_word_per_letter() {
+    assert_eq!(to_snake("HTTP"), "http");
+    assert_eq!(to_snake("HTTPApi"), "http_api");
+    assert_eq!(to_snake("TodoId"), "todo_id");
+    assert_eq!(to_snake("Todo"), "todo");
+}
+
+/// Digits are not letters, so they neither start nor end a word: `H2O` breaks
+/// before the trailing `O` because that is a capital following a digit, and
+/// `H2` stays `h2` because a digit does not separate anything from its prefix.
+#[test]
+fn digits_do_not_start_or_end_a_word() {
+    assert_eq!(to_snake("H2O"), "h2_o");
+    assert_eq!(to_snake("H2"), "h2");
+    assert_eq!(to_snake("Todo2Id"), "todo2_id");
+}
+
+/// The whole point, at the level the issue cares about: an acronym trait must
+/// generate the routes and tool names an author can actually type. `h_t_t_p.list`
+/// is a wire surface nobody gets right, and the mistake stays invisible until an
+/// HTTP client 404s.
+#[test]
+fn an_acronym_trait_names_its_routes_with_the_whole_word() {
+    let text = match expand_src(
+        "pub trait HTTPService {
+        async fn list(&self, ctx: &Ctx, _input: ()) -> Result<Vec<Todo>, TodoErr>;
+    }",
+    ) {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("an acronym trait name is legal Rust and must expand: {e}"),
+    };
+    assert!(
+        text.contains("/api/http.list"),
+        "the route must be `/api/http.list`, got: {text}"
+    );
+    assert!(
+        !text.contains("h_t_t_p"),
+        "an acronym must never become one letter per word, got: {text}"
+    );
+}
+
 #[test]
 fn retired_surface_attribute_is_a_hard_error() {
     // Silently ignoring this would leave an author believing they hid a
