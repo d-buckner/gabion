@@ -71,6 +71,19 @@ pub(crate) struct Method {
     pub(crate) description: String,
 }
 
+impl Method {
+    /// Whether this op is served on a `POST /api/<ns>.<op>` route.
+    ///
+    /// A listen op is not: one JSON body cannot carry N items, so it is served on
+    /// `GET /api/ws` and named in the OpenAPI document's `x-gabion-streams`
+    /// (docs/streaming.md §5). The router, the document and the route list the
+    /// registry advertises all ask this question here, so they cannot drift into
+    /// serving one thing and reporting another.
+    pub(crate) fn has_post_route(&self) -> bool {
+        self.stream.is_none()
+    }
+}
+
 /// The route a method is served on: `POST /api/todo.create`.
 ///
 /// The spec's wire decision (spec §5) is one POST per method, dotted under

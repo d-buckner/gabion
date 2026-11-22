@@ -91,3 +91,26 @@ fn a_contract_mounts_without_the_host_knowing_its_ops() {
     assert_eq!(host.mounted(), vec!["incident"]);
     assert_eq!(host.exposed().len(), 3);
 }
+
+/// What a host logs as its HTTP surface has to be what its routers register.
+/// `check.watch` and `check.tail` are listen ops: they are served on `GET /api/ws`
+/// and named in the OpenAPI document's `x-gabion-streams`, so neither has a
+/// `POST /api/...` route to report.
+#[test]
+fn the_exposed_routes_are_the_post_routes_the_routers_serve() {
+    let host = host_pulse_server::host();
+    assert_eq!(
+        host.exposed_routes(),
+        vec![
+            "/api/check.add",
+            "/api/check.history",
+            "/api/check.list",
+            "/api/check.probe",
+            "/api/check.sweep",
+            "/api/incident.evaluate",
+            "/api/incident.list",
+            "/api/incident.uptime",
+        ],
+        "the route list a host logs must be the routes its routers serve"
+    );
+}

@@ -55,6 +55,7 @@ fn host() -> Host {
 #[allow(clippy::unwrap_used)] // host main is bootstrap; the spec bans unwrap in *-core
 async fn main() {
     println!("serving: {}", host().exposed().join(", "));
+    println!("routes: {}", host().exposed_routes().join(", "));
 
     if std::env::args().any(|a| a == "--mcp-stdio") {
         match host().mcp() {

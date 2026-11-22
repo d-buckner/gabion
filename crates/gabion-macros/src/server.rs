@@ -52,7 +52,7 @@ pub(crate) fn gen_server(c: &Contract) -> proc_macro2::TokenStream {
 /// returned them one at a time would be a second, worse WebSocket. The op is
 /// served on `/api/ws` instead, and named in `x-gabion-streams`.
 fn gen_handlers(c: &Contract) -> proc_macro2::TokenStream {
-    let handlers = c.methods.iter().filter(|m| m.stream.is_none()).map(|m| {
+    let handlers = c.methods.iter().filter(|m| m.has_post_route()).map(|m| {
         let id = &m.ident;
         let hid = format_ident!("__h_{}", m.snake);
         let parse = match &m.input {
@@ -116,7 +116,7 @@ fn gen_handlers(c: &Contract) -> proc_macro2::TokenStream {
 
 fn gen_routes(c: &Contract) -> proc_macro2::TokenStream {
     let ns = &c.ns;
-    let routes = c.methods.iter().filter(|m| m.stream.is_none()).map(|m| {
+    let routes = c.methods.iter().filter(|m| m.has_post_route()).map(|m| {
         let hid = format_ident!("__h_{}", m.snake);
         let route = route(ns, m);
         quote! { .route(#route, ::axum::routing::post(#hid)) }
@@ -133,7 +133,7 @@ fn gen_openapi(c: &Contract) -> proc_macro2::TokenStream {
     let openapi_fn = format_ident!("{}_openapi", ns);
     let methods = &c.methods;
 
-    let paths = methods.iter().filter(|m| m.stream.is_none()).map(|m| {
+    let paths = methods.iter().filter(|m| m.has_post_route()).map(|m| {
         let path = route(ns, m);
         let operation_id = format!("{}_{}", ns, m.snake);
         let summary = &m.summary;

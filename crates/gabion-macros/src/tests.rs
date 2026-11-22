@@ -270,3 +270,35 @@ fn a_streaming_feature_routes_its_ordinary_ops_through_the_socket() {
         "a feature with no listen op must keep the plain POST client"
     );
 }
+
+/// `Surfaces.routes` is what a host logs as the HTTP surface it serves, so it has
+/// to be the routes the router actually registers. A listen op has no
+/// `POST /api/<ns>.<op>` — it is served on `GET /api/ws` and named in the OpenAPI
+/// document's `x-gabion-streams` — so listing it here would be a report of success
+/// over a route nobody serves.
+#[test]
+fn a_listen_op_is_not_advertised_as_a_post_route() {
+    let out = expand_src(
+        "pub trait S {
+        async fn ping(&self, ctx: &Ctx) -> Result<Frame, E>;
+        async fn watch(&self, ctx: &Ctx) -> Result<Each<Frame>, E>;
+    }",
+    );
+    let text = match out {
+        Ok(t) => t.to_string(),
+        Err(e) => panic!("a mixed contract must expand: {e}"),
+    };
+    assert!(
+        text.contains("\"/api/s.ping\""),
+        "the value op's route must be advertised"
+    );
+    assert!(
+        !text.contains("/api/s.watch"),
+        "a listen op has no POST route, so it must not be advertised as one"
+    );
+    // The op is not gone: it is a stream, and the document says so.
+    assert!(
+        text.contains("doc . stream"),
+        "the listen op must still reach x-gabion-streams"
+    );
+}
